@@ -7,14 +7,14 @@ import {
   getNode, getMember, findMember, membersAt, rebuildBraces, reset,
   serialize, deserialize, centroid, DEFAULTS,
 } from '../engine/model.js';
-import { step, waveValue, targetLength, FIXED_DT } from '../engine/sim.js';
+import { step, FIXED_DT } from '../engine/sim.js';
 import { DEMOS } from '../engine/demos.js';
 
 // ============================================================
 // CONFIG / VERSION
 // ============================================================
 
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.2.0';
 const BUILD_DATE = '2026-09-01';
 const GRID = 0.25;            // snap pitch, meters
 const NODE_R = 0.055;         // node draw radius, meters
@@ -24,6 +24,9 @@ const HIT_MEMBER_PX = 11;     // member hit distance, screen px
 const AUTOSAVE_KEY = 'trussforge.autosave';
 const VIEW_KEY = 'trussforge.view';
 const MAX_STEPS_FRAME = 24;   // sim steps per frame cap (heavy tab safety)
+const UNDO_DEPTH = 60;
+const MASS_STEPS = [0.5, 1, 2, 4];   // pill mass chip cycles through these
+const STATUS_HOLD_MS = 2500;  // a status message survives this long while running
 
 // ============================================================
 // APP STATE
@@ -34,13 +37,14 @@ let running = false;
 let tool = 'select';          // select | node | beam | spring | actuator | erase
 let snapOn = true;
 let follow = false;
-let sel = { kind: null, id: 0 };       // kind: 'node' | 'member' | null
+let sel = { kind: null, id: 0 };       // kind: 'node' | 'member' | 'world' | null
 let cam = { x: 0.6, y: 0.9, zoom: 110 };   // world center + px per meter
-let statusMsg = 'Ready.';
+let toolHint = '';
 
 const $ = id => document.getElementById(id);
 const canvas = $('board');
 const ctx = canvas.getContext('2d');
+const narrow = matchMedia('(max-width: 820px)');   // phone layout (props = sheet)
 
 // ============================================================
 // CAMERA / TRANSFORM  (world y is UP, screen y is down)
@@ -48,12 +52,15 @@ const ctx = canvas.getContext('2d');
 
 let vw = 0, vh = 0, dpr = 1;
 
+let pendingFit = false;     // fitView ran before the board had a real size
+
 function resize() {
   dpr = window.devicePixelRatio || 1;
   const r = canvas.getBoundingClientRect();
   vw = r.width; vh = r.height;
   canvas.width = Math.round(vw * dpr);
   canvas.height = Math.round(vh * dpr);
+  if (pendingFit && vw > 50 && vh > 50) fitView();
   draw();
 }
 window.addEventListener('resize', resize);
@@ -66,6 +73,9 @@ const wy = py => cam.y - (py - vh / 2) / cam.zoom;
 function snap(v) { return snapOn ? Math.round(v / GRID) * GRID : v; }
 
 function fitView() {
+  // a hidden / not-yet-laid-out board has no size: fit again on resize
+  pendingFit = !(vw > 50 && vh > 50);
+  if (pendingFit) return;
   if (!state.nodes.length) { cam = { x: 0.6, y: 0.9, zoom: 110 }; return; }
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (const n of state.nodes) {
@@ -96,6 +106,9 @@ function loadView() {
 // RENDERER
 // ============================================================
 
+// draw() is the ONLY place the board repaints. While paused the frame
+// loop does not call it (a static scene at 60 fps just burns phone
+// battery), so every paused edit path calls draw() itself.
 function draw() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = '#0d131a';
@@ -107,6 +120,7 @@ function draw() {
   for (const m of state.members) drawMember(m);
   drawGesture();
   for (const n of state.nodes) drawNode(n);
+  positionPill();
 }
 
 function drawGrid() {
@@ -223,31 +237,39 @@ function drawActuator(x1, y1, x2, y2, a, b, m, w) {
 
 function drawNode(n) {
   const x = sx(n.x), y = sy(n.y);
-  const r = Math.max(4, NODE_R * cam.zoom);
+  // heavier nodes draw bigger (area ~ mass), capped so 4 kg stays tappable
+  const r = Math.max(4, NODE_R * cam.zoom) * Math.min(1.6, Math.sqrt(Math.max(0.3, n.mass)));
   const seld = sel.kind === 'node' && sel.id === n.id;
   if (seld) {
     ctx.fillStyle = 'rgba(47, 129, 247, .35)';
     ctx.beginPath(); ctx.arc(x, y, r + 7, 0, 7); ctx.fill();
   }
+  if (n.pinned) {
+    // anchored: a support triangle + ground line under the node, the
+    // way a fixed support is drawn on a structural diagram
+    ctx.strokeStyle = '#e3b341';
+    ctx.fillStyle = 'rgba(227, 179, 65, .18)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - r - 6, y + r + 9);
+    ctx.lineTo(x + r + 6, y + r + 9);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x - r - 10, y + r + 13); ctx.lineTo(x + r + 10, y + r + 13);
+    ctx.stroke();
+  }
   ctx.fillStyle = n.pinned ? '#e3b341' : '#d3dce6';
   ctx.strokeStyle = '#0d131a';
   ctx.lineWidth = 2;
   if (n.locked) {
-    // square-ish = welded angles
+    // square = welded joint (angles held); round = hinge
     ctx.beginPath();
     ctx.roundRect(x - r, y - r, 2 * r, 2 * r, r * 0.3);
     ctx.fill(); ctx.stroke();
   } else {
     ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); ctx.stroke();
-  }
-  if (n.pinned) {
-    // anchor ring + ground flag
-    ctx.strokeStyle = '#e3b341';
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(x, y, r + 4, 0, 7); ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x - r - 2, y + r + 6); ctx.lineTo(x + r + 2, y + r + 6);
-    ctx.stroke();
   }
 }
 
@@ -306,21 +328,77 @@ function distToSeg(px, py, x1, y1, x2, y2) {
 }
 
 // ============================================================
+// UNDO / REDO  (snapshots of the serialized build; cheap for toy sizes)
+// ============================================================
+
+const undoStack = [], redoStack = [];
+const snapshot = () => JSON.stringify(serialize(state));
+
+// Call BEFORE a mutation. Identical consecutive snapshots collapse, so it
+// is safe to call speculatively (pointerdown on a node that ends up a tap).
+function pushUndo() {
+  const s = snapshot();
+  if (undoStack.length && undoStack[undoStack.length - 1] === s) return;
+  undoStack.push(s);
+  if (undoStack.length > UNDO_DEPTH) undoStack.shift();
+  redoStack.length = 0;
+  syncUndoButtons();
+}
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(snapshot());
+  restoreSnapshot(undoStack.pop());
+  setStatus('Undo.');
+}
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(snapshot());
+  restoreSnapshot(redoStack.pop());
+  setStatus('Redo.');
+}
+function restoreSnapshot(s) {
+  state = deserialize(JSON.parse(s));     // lands in the build pose
+  if (running) setRunning(false);
+  syncToolbar();
+  syncUndoButtons();
+  select(null);
+  markDirty();
+  draw();
+}
+function syncUndoButtons() {
+  $('undoBtn').disabled = !undoStack.length;
+  $('redoBtn').disabled = !redoStack.length;
+}
+$('undoBtn').addEventListener('click', undo);
+$('redoBtn').addEventListener('click', redo);
+
+// ============================================================
 // POINTER INPUT  (Pointer Events only - mouse / touch / pen)
 // ============================================================
 
 const pointers = new Map();   // pointerId -> {sx, sy, startX, startY, moved}
 let gesture = null;           // null | {type:'pan'|'pinch'|'dragNode'|'member', ...}
 
+// Board-relative position. clientX minus the canvas rect rather than
+// offsetX: identical for real input, and correct for synthetic events too.
+function evPos(ev) {
+  const r = canvas.getBoundingClientRect();
+  return [ev.clientX - r.left, ev.clientY - r.top];
+}
+
 canvas.addEventListener('pointerdown', ev => {
   ev.preventDefault();
   try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* synthetic events */ }
-  const p = { sx: ev.offsetX, sy: ev.offsetY, startX: ev.offsetX, startY: ev.offsetY, moved: false };
+  const [ex, ey] = evPos(ev);
+  const p = { sx: ex, sy: ey, startX: ex, startY: ey, moved: false };
   pointers.set(ev.pointerId, p);
 
   if (pointers.size === 2) {
-    // second finger: whatever was happening becomes a pinch
+    // second finger: whatever was happening becomes a pinch. Mark BOTH
+    // pointers as moved so the finger that lifts last can never count
+    // as a tap (a pinch must never place a node).
     const [a, b] = [...pointers.values()];
+    a.moved = true; b.moved = true;
     gesture = {
       type: 'pinch',
       dist: Math.hypot(a.sx - b.sx, a.sy - b.sy),
@@ -332,6 +410,7 @@ canvas.addEventListener('pointerdown', ev => {
 
   const n = hitNode(p.sx, p.sy);
   if (tool === 'select' && n) {
+    if (!running) pushUndo();             // a drag is about to move the build pose
     gesture = { type: 'dragNode', id: n.id, moved: false };
   } else if ((tool === 'beam' || tool === 'spring' || tool === 'actuator') && n) {
     gesture = { type: 'member', from: n.id, sx: p.sx, sy: p.sy };
@@ -343,7 +422,7 @@ canvas.addEventListener('pointerdown', ev => {
 canvas.addEventListener('pointermove', ev => {
   const p = pointers.get(ev.pointerId);
   if (!p) return;
-  const nx = ev.offsetX, ny = ev.offsetY;
+  const [nx, ny] = evPos(ev);
   const dxs = nx - p.sx, dys = ny - p.sy;
   if (Math.hypot(nx - p.startX, ny - p.startY) > TAP_PX) p.moved = true;
   p.sx = nx; p.sy = ny;
@@ -402,7 +481,8 @@ canvas.addEventListener('pointercancel', endPointer);
 
 canvas.addEventListener('wheel', ev => {
   ev.preventDefault();
-  zoomAt(ev.offsetX, ev.offsetY, ev.deltaY < 0 ? 1.12 : 1 / 1.12);
+  const [zx, zy] = evPos(ev);
+  zoomAt(zx, zy, ev.deltaY < 0 ? 1.12 : 1 / 1.12);
   saveView();
   if (!running) draw();
 }, { passive: false });
@@ -423,15 +503,15 @@ function tapAt(px, py) {
   const m = n ? null : hitMember(px, py);
 
   if (tool === 'erase') {
-    if (n) { removeNode(state, n.id); select(null); markDirty(); }
-    else if (m) { removeMember(state, m.id); select(null); markDirty(); }
+    if (n) { pushUndo(); removeNode(state, n.id); select(null); markDirty(); }
+    else if (m) { pushUndo(); removeMember(state, m.id); select(null); markDirty(); }
     return;
   }
   if (tool === 'node') {
     if (n) { select('node', n.id); return; }
     if (m) { select('member', m.id); return; }
-    const nn = addNode(state, snap(wx(px)), snap(wy(py)));
-    if (running) { /* born at rest where placed */ }
+    pushUndo();
+    const nn = addNode(state, snap(wx(px)), snap(wy(py)));   // born at rest where placed
     select('node', nn.id);
     markDirty();
     return;
@@ -448,15 +528,19 @@ function finishMember(g, p) {
   if (!p.moved) { select('node', from.id); return; }   // just a tap on a node
   let to = hitNode(p.sx, p.sy);
   if (to && to.id === from.id) return;
+  if (to && findMember(state, from.id, to.id)) {
+    setStatus('Those two nodes are already connected.');
+    select('member', findMember(state, from.id, to.id).id);
+    return;
+  }
+  pushUndo();
   if (!to) {
     to = addNode(state, snap(wx(p.sx)), snap(wy(p.sy)));
   }
-  if (!findMember(state, from.id, to.id)) {
-    const m = addMember(state, from, to, tool);
-    if (m) {
-      if (running) rebuildBraces(state, true);
-      select('member', m.id);
-    }
+  const m = addMember(state, from, to, tool);
+  if (m) {
+    if (running) rebuildBraces(state, true);
+    select('member', m.id);
   }
   markDirty();
 }
@@ -472,34 +556,39 @@ function bakeNode(id) {
       m.restLen = Math.hypot(b.x - a.x, b.y - a.y);
     }
     rebuildBraces(state);
+    if (sel.kind === 'member') renderProps();   // rest length may have changed
   }
   markDirty();
 }
+
+const TOOL_HINTS = {
+  select: 'Drag a node to move it. Tap anything to see its settings.',
+  node: 'Tap empty space to place a node.',
+  beam: 'Drag from a node to another node (or to empty space) to add a rigid beam.',
+  spring: 'Drag from a node to add a stretchy spring.',
+  actuator: 'Drag from a node to add a muscle. Tap it afterwards to shape its wave.',
+  erase: 'Tap a node or member to delete it.',
+};
 
 function setTool(t) {
   tool = t;
   document.querySelectorAll('.palItem').forEach(el =>
     el.classList.toggle('active', el.dataset.tool === t));
-  setHint({
-    select: 'Drag a node to move it. Tap to select.',
-    node: 'Tap empty space to place a node.',
-    beam: 'Drag node to node (or node to empty) to add a beam.',
-    spring: 'Drag node to node (or node to empty) to add a spring.',
-    actuator: 'Drag node to node to add a muscle. Select it to shape its wave.',
-    erase: 'Tap a node or member to delete it.',
-  }[t] || '');
+  toolHint = TOOL_HINTS[t] || '';
+  setHint(toolHint);
 }
 document.querySelectorAll('.palItem').forEach(el =>
   el.addEventListener('pointerup', () => setTool(el.dataset.tool)));
 
 // ============================================================
-// SELECTION / NODE PILL / PROPS
+// SELECTION / NODE PILL
 // ============================================================
 
 function select(kind, id) {
   sel = { kind: kind || null, id: id || 0 };
   renderProps();
-  positionPill();
+  if (!running) draw();        // draw() positions the pill too
+  else positionPill();
 }
 
 function selectedNode() { return sel.kind === 'node' ? getNode(state, sel.id) : null; }
@@ -511,50 +600,153 @@ function positionPill() {
   const n = selectedNode();
   if (!n) { pill.classList.add('hidden'); return; }
   pill.classList.remove('hidden');
-  $('pillPin').classList.toggle('active', n.pinned);
-  $('pillLock').classList.toggle('active', n.locked);
+  $('pillAnchor').classList.toggle('active', n.pinned);
+  $('pillWeld').classList.toggle('active', n.locked);
+  $('pillMass').textContent = fmtMass(n.mass);
   const px = Math.max(8, Math.min(vw - pill.offsetWidth - 8, sx(n.x) - pill.offsetWidth / 2));
   const py = Math.max(8, Math.min(vh - 46, sy(n.y) - 58));
   pill.style.left = px + 'px';
   pill.style.top = py + 'px';
 }
 
-$('pillPin').addEventListener('click', () => {
+const fmtMass = m => `${+m.toFixed(1)} kg`;
+
+function toggleAnchor() {
   const n = selectedNode(); if (!n) return;
+  pushUndo();
   n.pinned = !n.pinned;
   if (n.pinned) { n.px = n.x; n.py = n.y; }
-  positionPill(); markDirty(); if (!running) draw();
-});
-$('pillLock').addEventListener('click', () => {
+  afterNodeEdit(n.pinned ? 'Anchored: this node is fixed to the world.' : 'Released: the node moves freely again.');
+}
+function toggleWeld() {
   const n = selectedNode(); if (!n) return;
+  pushUndo();
   n.locked = !n.locked;
   rebuildBraces(state, running);
-  positionPill(); markDirty(); if (!running) draw();
-});
-$('pillDel').addEventListener('click', () => {
+  const k = membersAt(state, n.id).length;
+  afterNodeEdit(n.locked
+    ? (k >= 2 ? 'Welded: members meeting here now keep their angles.'
+              : 'Welded. It needs 2+ members here to have any effect.')
+    : 'Unwelded: this joint is a free hinge again.');
+}
+function cycleMass() {
   const n = selectedNode(); if (!n) return;
+  pushUndo();
+  // jump to the next preset above the current mass (wraps around)
+  const next = MASS_STEPS.find(m => m > n.mass + 1e-9) ?? MASS_STEPS[0];
+  n.mass = next;
+  afterNodeEdit(`Mass ${fmtMass(next)}.`);
+}
+function deleteSelectedNode() {
+  const n = selectedNode(); if (!n) return;
+  pushUndo();
   removeNode(state, n.id);
-  select(null); markDirty(); if (!running) draw();
-});
+  select(null); markDirty();
+}
+function afterNodeEdit(msg) {
+  setStatus(msg);
+  renderProps();
+  markDirty();
+  if (!running) draw(); else positionPill();
+}
+$('pillAnchor').addEventListener('click', toggleAnchor);
+$('pillWeld').addEventListener('click', toggleWeld);
+$('pillMass').addEventListener('click', cycleMass);
+$('pillDel').addEventListener('click', deleteSelectedNode);
 
-// --- member props sheet ---------------------------------------------------
+// ============================================================
+// PROPERTIES PANEL  (node / member / world / legend)
+// ============================================================
 
 const propsEl = $('props');
 const propsBody = $('propsBody');
-$('propsClose').addEventListener('click', () => propsEl.classList.remove('open'));
+$('propsClose').addEventListener('click', () => {
+  if (sel.kind === 'world') select(null);
+  else propsEl.classList.remove('open');
+});
+
+// hovering / tapping a row shows its explanation in the hint bar
+propsBody.addEventListener('pointerover', ev => {
+  const row = ev.target.closest('[data-tip]');
+  if (row) setHint(row.dataset.tip);
+});
+propsBody.addEventListener('pointerleave', () => setHint(toolHint));
+
+const LEGEND_HTML = `
+<div class="legend">
+  <h4>How it works</h4>
+  <p><b>Nodes</b> are point masses. Drag them with Select. Round = hinge, square = welded.</p>
+  <p><span class="sw" style="background:#8b9cb6"></span><b>Beam</b> - rigid stick, holds its length.</p>
+  <p><span class="sw" style="background:#58a6ff"></span><b>Spring</b> - stretchy; stiffness and damping.</p>
+  <p><span class="sw" style="background:#e3b341"></span><b>Actuator</b> - a muscle. Its length follows a wave. Give muscles different phases to make a gait.</p>
+  <p><b>Anchor</b> - fixes a node to the world.</p>
+  <p><b>Weld</b> - members meeting at a node keep their angles (rigid joint).</p>
+  <p class="keys"><kbd>Space</kbd> run <kbd>R</kbd> reset <kbd>G</kbd> snap <kbd>Ctrl+Z</kbd> undo<br>
+  <kbd>V</kbd> <kbd>N</kbd> <kbd>B</kbd> <kbd>S</kbd> <kbd>A</kbd> <kbd>E</kbd> tools <kbd>Del</kbd> delete</p>
+</div>`;
+
+const MEMBER_DESC = {
+  beam: 'Rigid stick. Holds its length exactly.',
+  spring: 'Stretchy. Stiffness sets the pull, damping kills the bounce.',
+  actuator: 'A muscle: its length follows the wave. Offset the phase between muscles to make a gait.',
+};
+
+const TIPS = {
+  kind: 'Change what this member is. Beams and muscles are rigid, springs stretch.',
+  restLen: 'Length the member wants to be. Change it while paused to pre-stress the build.',
+  k: 'How hard the spring pulls back per meter of stretch.',
+  c: 'How fast the spring stops bouncing. 0 = rings forever.',
+  wtype: 'sine = smooth push/pull. square = snaps between long and short.',
+  amp: 'How far the length swings, as a fraction of rest length (+/-).',
+  period: 'Seconds per cycle. All muscles share one clock.',
+  phase: 'Offset into the cycle (0-1). 0.5 = the opposite of a phase-0 muscle.',
+  duty: 'Fraction of each cycle spent long (square wave only).',
+  mass: 'Heavier nodes swing harder and sink into springs more.',
+  anchor: 'Anchor: fixed to the world, never moves. Good for hanging things and pivots.',
+  weld: 'Weld: members meeting here keep their angles. Needs 2+ members to do anything.',
+  gravity: 'Downward pull in m/s^2. Earth is 9.8. 0 = floaty.',
+  friction: 'Grip on the ground. 0 = ice, 1 = sticky. Uneven grip across the gait is what makes creatures crawl.',
+  drag: 'Air resistance. Higher = everything settles faster.',
+  speed: 'Simulation speed. 0.25x for slow motion.',
+};
 
 function renderProps() {
-  const m = selectedMember();
-  if (!m) {
-    propsBody.innerHTML = '<p class="hint">Tap a member to edit it. Tap a node for pin / lock / delete.</p>';
-    propsEl.classList.remove('open');
-    return;
-  }
+  $('worldBtn').classList.toggle('active', sel.kind === 'world');
+  const n = selectedNode(), m = selectedMember();
+  if (sel.kind === 'world') { renderWorldProps(); openSheet(true); return; }
+  if (n) { renderNodeProps(n); openSheet(!narrow.matches); return; }   // phone: the pill is enough
+  if (m) { renderMemberProps(m); openSheet(true); return; }
+  propsBody.innerHTML = LEGEND_HTML;
+  openSheet(false);
+}
+function openSheet(open) { propsEl.classList.toggle('open', open); }
+
+function renderNodeProps(n) {
+  const k = membersAt(state, n.id).length;
+  propsBody.innerHTML = `
+    <div class="propTitle">Node</div>
+    <p class="desc">A point mass with ${k} member${k === 1 ? '' : 's'}. Round = hinge, square = welded.</p>
+    <div class="toggles">
+      <button id="npAnchor" class="${n.pinned ? 'active' : ''}" data-tip="${TIPS.anchor}" title="${TIPS.anchor}">Anchor</button>
+      <button id="npWeld" class="${n.locked ? 'active' : ''}" data-tip="${TIPS.weld}" title="${TIPS.weld}">Weld</button>
+    </div>
+    ${propSlider('mass', 'mass', 0.2, 5, 0.1, n.mass, 'kg')}
+    <div class="propBtns"><button id="npDel" class="danger">Delete node</button></div>`;
+  $('npAnchor').addEventListener('click', toggleAnchor);
+  $('npWeld').addEventListener('click', toggleWeld);
+  $('npDel').addEventListener('click', deleteSelectedNode);
+  wireProp('mass', v => { n.mass = v; });
+}
+
+function renderMemberProps(m) {
   const rows = [];
   const title = { beam: 'Beam', spring: 'Spring', actuator: 'Actuator' }[m.kind];
   rows.push(`<div class="propTitle">${title}</div>`);
-  rows.push(propSelect('kind', 'kind', ['beam', 'spring', 'actuator'], m.kind));
-  rows.push(propSlider('restLen', 'rest length', 0.1, 4, 0.05, m.restLen, 'm'));
+  rows.push(`<p class="desc">${MEMBER_DESC[m.kind]}</p>`);
+  rows.push(propSelect('kind', 'type', ['beam', 'spring', 'actuator'], m.kind));
+  // a freeform build can be longer than the default range: widen it
+  const lenMax = Math.max(4, Math.ceil(m.restLen * 1.5 * 20) / 20);
+  rows.push(propSlider('restLen', 'rest length', 0.1, lenMax, 0.05, m.restLen, 'm'));
   if (m.kind === 'spring') {
     rows.push(propSlider('k', 'stiffness', 1, 400, 1, m.k, 'N/m'));
     rows.push(propSlider('c', 'damping', 0, 10, 0.1, m.c, ''));
@@ -570,9 +762,8 @@ function renderProps() {
   }
   rows.push('<div class="propBtns"><button id="mDel" class="danger">Delete</button></div>');
   propsBody.innerHTML = rows.join('');
-  propsEl.classList.add('open');
 
-  wireProp('restLen', v => { m.restLen = v; syncBraces(); });
+  wireProp('restLen', v => { m.restLen = v; rebuildBraces(state, running); });
   if (m.kind === 'spring') {
     wireProp('k', v => { m.k = v; });
     wireProp('c', v => { m.c = v; });
@@ -586,24 +777,47 @@ function renderProps() {
   }
   wireSel('kind', v => { changeKind(m, v); });
   $('mDel').addEventListener('click', () => {
+    pushUndo();
     removeMember(state, m.id);
-    select(null); markDirty(); if (!running) draw();
+    select(null); markDirty();
   });
 }
 
+function renderWorldProps() {
+  const W = state.world;
+  propsBody.innerHTML = `
+    <div class="propTitle">World</div>
+    <p class="desc">Applies to the whole build. Saved with it.</p>
+    ${propSlider('gravity', 'gravity', 0, 25, 0.1, W.gravity, 'm/s2')}
+    ${propSlider('friction', 'ground grip', 0, 1, 0.01, W.friction, '')}
+    ${propSlider('drag', 'air drag', 0, 2, 0.01, W.drag, '')}
+    ${propSelect('speed', 'sim speed', ['0.25', '0.5', '1', '2', '4'], String(W.speed), v => v + 'x')}`;
+  wireProp('gravity', v => { W.gravity = v; });
+  wireProp('friction', v => { W.friction = v; });
+  wireProp('drag', v => { W.drag = v; });
+  wireSel('speed', v => { W.speed = parseFloat(v); });
+}
+
 function propSlider(id, label, min, max, stepv, val, unit) {
-  return `<div class="propRow"><label>${label} <span class="pv" id="pv_${id}">${fmtVal(val)} ${unit}</span></label>
+  const tip = TIPS[id] || '';
+  return `<div class="propRow" data-tip="${tip}" title="${tip}">
+    <label for="pp_${id}">${label} <span class="pv" id="pv_${id}" data-unit="${unit}">${fmtVal(val)} ${unit}</span></label>
     <input type="range" id="pp_${id}" min="${min}" max="${max}" step="${stepv}" value="${val}"></div>`;
 }
-function propSelect(id, label, opts, val) {
-  const os = opts.map(o => `<option value="${o}"${o === val ? ' selected' : ''}>${o}</option>`).join('');
-  return `<div class="propRow"><label>${label}</label><select id="pp_${id}">${os}</select></div>`;
+function propSelect(id, label, opts, val, show = o => o) {
+  const tip = TIPS[id] || '';
+  const os = opts.map(o => `<option value="${o}"${o === val ? ' selected' : ''}>${show(o)}</option>`).join('');
+  return `<div class="propRow" data-tip="${tip}" title="${tip}"><label for="pp_${id}">${label}</label><select id="pp_${id}">${os}</select></div>`;
 }
+// Sliders push ONE undo entry per drag (on pointerdown), not one per tick.
 function wireProp(id, fn) {
   const el = $('pp_' + id);
+  el.addEventListener('pointerdown', pushUndo);
+  el.addEventListener('keydown', pushUndo);
   el.addEventListener('input', () => {
     const v = parseFloat(el.value);
-    $('pv_' + id).textContent = fmtVal(v) + ' ' + ($('pv_' + id).textContent.split(' ').pop() || '');
+    const pv = $('pv_' + id);
+    pv.textContent = fmtVal(v) + ' ' + pv.dataset.unit;
     fn(v);
     markDirty();
     if (!running) draw();
@@ -611,7 +825,7 @@ function wireProp(id, fn) {
 }
 function wireSel(id, fn) {
   const el = $('pp_' + id);
-  el.addEventListener('change', () => { fn(el.value); markDirty(); if (!running) draw(); });
+  el.addEventListener('change', () => { pushUndo(); fn(el.value); markDirty(); if (!running) draw(); });
 }
 const fmtVal = v => (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2));
 
@@ -622,10 +836,8 @@ function changeKind(m, kind) {
   renderProps();
 }
 
-function syncBraces() { rebuildBraces(state, running); }
-
 // ============================================================
-// TOOLBAR / WORLD DRAWER
+// TOOLBAR
 // ============================================================
 
 $('ver').textContent = `v${APP_VERSION} - ${BUILD_DATE}`;
@@ -637,6 +849,7 @@ function setRunning(r) {
   runBtn.classList.toggle('running', r);
   if (r) { acc = 0; lastTs = 0; }
   setStatus(r ? 'Running.' : 'Paused.');
+  if (!r) draw();
 }
 runBtn.addEventListener('click', () => setRunning(!running));
 
@@ -652,8 +865,10 @@ $('snapBtn').addEventListener('click', () => {
   if (!running) draw();
 });
 $('gravBtn').addEventListener('click', () => {
+  pushUndo();
   state.world.gravityOn = !state.world.gravityOn;
-  $('gravBtn').classList.toggle('active', state.world.gravityOn);
+  syncToolbar();
+  setStatus(state.world.gravityOn ? 'Gravity on.' : 'Gravity off.');
   markDirty();
 });
 $('followBtn').addEventListener('click', () => {
@@ -661,66 +876,58 @@ $('followBtn').addEventListener('click', () => {
   $('followBtn').classList.toggle('active', follow);
 });
 $('worldBtn').addEventListener('click', () => {
-  $('toolbar').classList.toggle('world-open');
-  syncWorldUI();
+  select(sel.kind === 'world' ? null : 'world');
 });
 
-function syncWorldUI() {
-  $('wGrav').value = state.world.gravity;
-  $('wFric').value = state.world.friction;
-  $('wDrag').value = state.world.drag;
-  $('wSpeed').value = String(state.world.speed);
-  $('wGravV').textContent = state.world.gravity.toFixed(1);
-  $('wFricV').textContent = state.world.friction.toFixed(2);
-  $('wDragV').textContent = state.world.drag.toFixed(2);
+// toolbar state that lives in the world/build (gravity toggle, world panel)
+function syncToolbar() {
+  $('gravBtn').classList.toggle('active', state.world.gravityOn);
+  if (sel.kind === 'world') renderProps();
 }
-$('wGrav').addEventListener('input', () => {
-  state.world.gravity = parseFloat($('wGrav').value);
-  $('wGravV').textContent = state.world.gravity.toFixed(1);
-  markDirty();
-});
-$('wFric').addEventListener('input', () => {
-  state.world.friction = parseFloat($('wFric').value);
-  $('wFricV').textContent = state.world.friction.toFixed(2);
-  markDirty();
-});
-$('wDrag').addEventListener('input', () => {
-  state.world.drag = parseFloat($('wDrag').value);
-  $('wDragV').textContent = state.world.drag.toFixed(2);
-  markDirty();
-});
-$('wSpeed').addEventListener('change', () => {
-  state.world.speed = parseFloat($('wSpeed').value);
-  markDirty();
-});
 
 $('clearBtn').addEventListener('click', () => {
+  if (!state.nodes.length) return;
+  pushUndo();
   state = createState();
   select(null);
   setRunning(false);
+  syncToolbar();
   markDirty();
-  setStatus('Cleared.');
+  setStatus('Cleared. Ctrl+Z (or the undo arrow) brings it back.');
   draw();
+});
+
+// Buttons keep keyboard focus after a click, so Space would re-press
+// them AND fire the run/pause shortcut. Drop focus once clicked.
+document.addEventListener('click', ev => {
+  const b = ev.target.closest('button');
+  if (b) b.blur();
 });
 
 // keyboard
 window.addEventListener('keydown', ev => {
-  if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'SELECT') return;
+  const tag = ev.target.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
   const k = ev.key.toLowerCase();
-  if (k === ' ') { ev.preventDefault(); setRunning(!running); }
+  const mod = ev.ctrlKey || ev.metaKey;
+  if (mod && k === 'z') { ev.preventDefault(); if (ev.shiftKey) redo(); else undo(); }
+  else if (mod && k === 'y') { ev.preventDefault(); redo(); }
+  else if (mod && k === 's') { ev.preventDefault(); saveFile(); }
+  else if (mod && k === 'o') { ev.preventDefault(); $('openFile').click(); }
+  else if (mod) return;
+  else if (k === ' ') { ev.preventDefault(); setRunning(!running); }
   else if (k === 'r') $('resetBtn').click();
   else if (k === 'g') $('snapBtn').click();
   else if (k === 'v') setTool('select');
   else if (k === 'n') setTool('node');
   else if (k === 'b') setTool('beam');
-  else if (k === 's' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); saveFile(); }
   else if (k === 's') setTool('spring');
   else if (k === 'a') setTool('actuator');
   else if (k === 'e') setTool('erase');
-  else if (k === 'o' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); $('openFile').click(); }
+  else if (k === 'escape') select(null);
   else if (k === 'delete' || k === 'backspace') {
-    if (selectedNode()) $('pillDel').click();
-    else if (selectedMember()) { removeMember(state, sel.id); select(null); markDirty(); draw(); }
+    if (selectedNode()) deleteSelectedNode();
+    else if (selectedMember()) { pushUndo(); removeMember(state, sel.id); select(null); markDirty(); }
   }
 });
 
@@ -746,10 +953,12 @@ $('openFile').addEventListener('change', async ev => {
   if (!f) return;
   try {
     const doc = JSON.parse(await f.text());
-    state = deserialize(doc);
+    const next = deserialize(doc);
+    pushUndo();
+    state = next;
     select(null);
     setRunning(false);
-    syncWorldUI();
+    syncToolbar();
     fitView();
     markDirty();
     setStatus(`Opened ${f.name}.`);
@@ -780,13 +989,13 @@ function loadAutosave() {
 // DEMOS / URL PARAMS / SELF-CHECK
 // ============================================================
 
-function loadDemo(name) {
+function loadDemo(name, { keepUndo = true } = {}) {
   const make = DEMOS[name];
   if (!make) return false;
+  if (keepUndo && state.nodes.length) pushUndo();
   state = make();
   select(null);
-  syncWorldUI();
-  $('gravBtn').classList.toggle('active', state.world.gravityOn);
+  syncToolbar();
   fitView();
   setStatus(`Demo: ${name}.`);
   draw();
@@ -802,13 +1011,14 @@ function handleParams() {
   const q = new URLSearchParams(location.search);
   const demo = q.get('demo');
   let loaded = false;
-  if (demo && DEMOS[demo]) loaded = loadDemo(demo);
+  if (demo && DEMOS[demo]) loaded = loadDemo(demo, { keepUndo: false });
   if (!loaded) {
     if (loadAutosave()) {
-      syncWorldUI(); fitView(); draw();
+      syncToolbar(); fitView(); draw();
       setStatus('Restored your last build.');
     } else {
-      loadDemo('walker');
+      loadDemo('walker', { keepUndo: false });
+      setStatus('Demo: walker. Press Run.');
     }
   }
 
@@ -857,40 +1067,44 @@ function dumpLayout() {
 // STATUS / MAIN LOOP
 // ============================================================
 
+let statusHoldUntil = 0;
 function setStatus(msg, isErr) {
-  statusMsg = msg;
   const el = $('status');
   el.textContent = msg;
   el.className = isErr ? 'err' : '';
+  statusHoldUntil = performance.now() + STATUS_HOLD_MS;   // survive the running ticker
 }
-function setHint(msg) { $('hint').textContent = msg; }
+// The hint bar is hidden on phones, so there the hint goes to the status
+// line instead - tool guidance is most useful right after switching tools.
+function setHint(msg) {
+  $('hint').textContent = msg;
+  if (narrow.matches && msg) setStatus(msg);
+}
 
 let acc = 0, lastTs = 0;
 
 function frame(ts) {
   requestAnimationFrame(frame);
-  if (running) {
-    if (!lastTs) lastTs = ts;
-    acc += Math.min(0.1, (ts - lastTs) / 1000) * (state.world.speed || 1);
-    lastTs = ts;
-    let n = 0;
-    while (acc >= FIXED_DT && n < MAX_STEPS_FRAME) {
-      step(state, FIXED_DT);
-      acc -= FIXED_DT; n++;
-    }
-    if (n === MAX_STEPS_FRAME) acc = 0;   // cannot keep up: drop time
-    if (follow && state.nodes.length) {
-      const c = centroid(state);
-      cam.x += (c.x - cam.x) * 0.06;
-      cam.y += (Math.max(c.y, 0.6) - cam.y) * 0.06;
-    }
+  if (!running) { lastTs = ts; return; }
+  if (!lastTs) lastTs = ts;
+  acc += Math.min(0.1, (ts - lastTs) / 1000) * (state.world.speed || 1);
+  lastTs = ts;
+  let n = 0;
+  while (acc >= FIXED_DT && n < MAX_STEPS_FRAME) {
+    step(state, FIXED_DT);
+    acc -= FIXED_DT; n++;
+  }
+  if (n === MAX_STEPS_FRAME) acc = 0;   // cannot keep up: drop time
+  if (follow && state.nodes.length) {
+    const c = centroid(state);
+    cam.x += (c.x - cam.x) * 0.06;
+    cam.y += (Math.max(c.y, 0.6) - cam.y) * 0.06;
+  }
+  if (ts > statusHoldUntil) {
     $('status').textContent =
       `t=${state.t.toFixed(1)}s  ${state.nodes.length} nodes, ${state.members.length} members`;
-  } else {
-    lastTs = ts;
   }
   draw();
-  positionPill();
 }
 
 // ============================================================
@@ -909,6 +1123,9 @@ window.TF = {
   play: () => setRunning(true),
   pause: () => setRunning(false),
   setTool,
+  select,
+  undo, redo,
+  get undoDepth() { return undoStack.length; },
   centroid: () => centroid(state),
   get cam() { return cam; },
   get tool() { return tool; },
@@ -921,9 +1138,9 @@ window.TF = {
 };
 
 loadView();
-resize();
 setTool('select');
+resize();
 handleParams();
-syncWorldUI();
-$('gravBtn').classList.toggle('active', state.world.gravityOn);
+syncToolbar();
+syncUndoButtons();
 requestAnimationFrame(frame);

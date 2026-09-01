@@ -22,10 +22,13 @@ Load the "Walker" demo and press Run.
 
 ## What you build with
 
-- **Node** - a point mass. Two independent flags:
-  - **Pin** - fixed to the world. Pinned toys (merry-go-round) or anchors.
-  - **Lock** - welds the ANGLES between all members meeting at that node
-    (free rotation otherwise).
+- **Node** - a point mass (mass editable: pill chip cycles 0.5/1/2/4 kg,
+  panel slider for fine control). Two independent flags:
+  - **Anchor** - fixed to the world. Pivots (merry-go-round), hanging
+    points. (Engine field: `pinned`.)
+  - **Weld** - the ANGLES between all members meeting at that node are
+    held - a rigid joint. Round nodes are free hinges. Needs 2+ members
+    to do anything. (Engine field: `locked`.)
 - **Beam** - rigid stick.
 - **Spring** - passive, stiffness + damping sliders.
 - **Actuator** - the muscle: a beam whose REST LENGTH follows a waveform.
@@ -40,13 +43,18 @@ Load the "Walker" demo and press Run.
   default; toggle it off for freeform placement.
 - Drag node-to-node (member tools) to connect; drag node-to-empty to
   create the far node and the member in one gesture.
-- Tap a node: pill with Pin / Lock / Del. Tap a member: props sheet with
-  live sliders - tweak while the sim runs.
+- Tap a node: pill with Anchor / Weld / mass / Del. Tap a member: the
+  properties panel (side panel on desktop, slide-up sheet on phones) with
+  live sliders - tweak while the sim runs. Every control has a one-line
+  tip (hover on desktop, status line on phone). Nothing selected = a
+  legend of what everything means.
 - One-finger drag on empty space pans; pinch zooms (mouse: wheel).
-- **Run/Pause**, **Reset** (restores the build pose), gravity toggle,
-  follow-camera toggle, **World** drawer (gravity, friction, drag, sim
-  speed), Save/Open (JSON file) plus localStorage autosave.
-- Keys: Space run, R reset, G snap, V/N/B/S/A/E tools, Ctrl+S/Ctrl+O.
+- **Run/Pause**, **Reset** (restores the build pose), **Undo/Redo**,
+  gravity toggle, follow-camera toggle, **World** (gravity, friction,
+  drag, sim speed - opens in the properties panel), Save/Open (JSON file)
+  plus localStorage autosave. Clear and Demo are undoable.
+- Keys: Space run, R reset, G snap, V/N/B/S/A/E tools, Esc deselect,
+  Del delete, Ctrl+Z/Ctrl+Y undo/redo, Ctrl+S/Ctrl+O.
 
 ## Physics notes
 
@@ -80,9 +88,7 @@ Load the "Walker" demo and press Run.
 
 ## Roadmap
 
-- Undo/redo (deliberately out of scope for v0.1).
 - Member strain coloring / force readouts.
-- Node mass editing in the UI (engine supports it).
 - More demos (bridge under load, catapult, inchworm).
 - Copy/paste of substructures; mirror.
 - Actuator group editing (select several, phase-spread them).

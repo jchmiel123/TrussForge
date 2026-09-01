@@ -9,10 +9,18 @@
 <body>
 <div id="app">
   <header id="toolbar">
-    <div class="brand">Truss<span>Forge</span><em id="ver">v0.1.0</em></div>
+    <div class="brand">Truss<span>Forge</span><em id="ver">v0.2.0</em></div>
     <div class="group">
       <button id="runBtn" class="accent" title="Run / pause the simulation (Space)">Run</button>
-      <button id="resetBtn" title="Reset to the build pose (R)">Reset</button>
+      <button id="resetBtn" title="Put everything back in the build pose (R)">Reset</button>
+    </div>
+    <div class="group">
+      <button id="undoBtn" class="icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+        <svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 3 L2.5 6.5 L6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 6.5 H9.5 A3.5 3.5 0 0 1 9.5 13.5 H6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+      <button id="redoBtn" class="icon" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>
+        <svg viewBox="0 0 16 16" width="16" height="16"><path d="M10 3 L13.5 6.5 L10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 6.5 H6.5 A3.5 3.5 0 0 0 6.5 13.5 H10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
     </div>
     <div class="group">
       <button id="snapBtn" class="icon active" title="Grid snap on/off (G)" aria-label="Grid snap">
@@ -24,39 +32,23 @@
       <button id="followBtn" class="icon" title="Camera follows the structure" aria-label="Follow">
         <svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><path d="M8 1 V3.5 M8 12.5 V15 M1 8 H3.5 M12.5 8 H15" stroke="currentColor" stroke-width="1.6"/></svg>
       </button>
-    </div>
-    <div class="group">
-      <button id="worldBtn" title="World settings (gravity, friction, drag, speed)">World</button>
-    </div>
-    <div class="group" id="worldGroup">
-      <label class="inp">gravity <input type="range" id="wGrav" min="0" max="25" step="0.1"><span class="wval" id="wGravV"></span></label>
-      <label class="inp">friction <input type="range" id="wFric" min="0" max="1" step="0.01"><span class="wval" id="wFricV"></span></label>
-      <label class="inp">drag <input type="range" id="wDrag" min="0" max="2" step="0.01"><span class="wval" id="wDragV"></span></label>
-      <label class="inp">speed
-        <select id="wSpeed">
-          <option value="0.25">0.25x</option>
-          <option value="0.5">0.5x</option>
-          <option value="1" selected>1x</option>
-          <option value="2">2x</option>
-          <option value="4">4x</option>
-        </select>
-      </label>
+      <button id="worldBtn" title="World settings: gravity, friction, drag, sim speed">World</button>
     </div>
     <div class="group right">
       <button id="saveBtn" title="Save the build to a JSON file (Ctrl+S)">Save</button>
       <button id="openBtn" title="Open a saved build file (Ctrl+O)">Open</button>
       <input type="file" id="openFile" accept=".json,application/json" style="display:none">
-      <select id="demoSel">
+      <select id="demoSel" title="Load a demo build (your current build stays in Undo)">
         <option value="">Demo...</option>
         <option value="walker">Walker</option>
         <option value="merry">Merry-go-round</option>
       </select>
-      <button id="clearBtn">Clear</button>
+      <button id="clearBtn" title="Clear the board (Undo brings it back)">Clear</button>
     </div>
   </header>
   <div id="main">
     <aside id="palette">
-      <div class="palItem active" data-tool="select" title="Select / move / poke (V)">
+      <div class="palItem active" data-tool="select" title="Select / move (V)">
         <svg viewBox="0 0 22 22" width="22" height="22"><path d="M5 2.5 L17.5 11 L11.7 12.3 L14.8 18.6 L12.3 19.9 L9.2 13.6 L5 17 Z" fill="currentColor"/></svg>
         <div class="lbl">Select</div>
       </div>
@@ -68,11 +60,11 @@
         <svg viewBox="0 0 22 22" width="22" height="22"><path d="M4 18 L18 4" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>
         <div class="lbl">Beam</div>
       </div>
-      <div class="palItem" data-tool="spring" title="Spring: passive, stiffness + damping (S)">
+      <div class="palItem" data-tool="spring" title="Spring: stretchy, stiffness + damping (S)">
         <svg viewBox="0 0 22 22" width="22" height="22"><path d="M3 19 L6 16 L8 18 L10 14 L12 16 L14 12 L16 14 L19 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
         <div class="lbl">Spring</div>
       </div>
-      <div class="palItem" data-tool="actuator" title="Actuator: a muscle - its rest length follows a waveform (A)">
+      <div class="palItem" data-tool="actuator" title="Actuator: a muscle - its length follows a wave (A)">
         <svg viewBox="0 0 22 22" width="22" height="22"><path d="M4 18 L9 13 M13 9 L18 4" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><rect x="8.4" y="8.4" width="5.2" height="5.2" rx="1.2" fill="currentColor"/></svg>
         <div class="lbl">Actuator</div>
       </div>
@@ -84,15 +76,15 @@
     <div id="boardWrap">
       <canvas id="board"></canvas>
       <div id="nodePill" class="hidden">
-        <button id="pillPin" title="Pin: fix this node to the world">Pin</button>
-        <button id="pillLock" title="Lock: weld the angles between members meeting here">Lock</button>
-        <button id="pillDel" class="danger" title="Delete this node">Del</button>
+        <button id="pillAnchor" title="Anchor: fix this node to the world so it never moves">Anchor</button>
+        <button id="pillWeld" title="Weld: members meeting here keep their angles (rigid joint)">Weld</button>
+        <button id="pillMass" title="Mass: tap to cycle 0.5 / 1 / 2 / 4 kg">1 kg</button>
+        <button id="pillDel" class="danger" title="Delete this node and its members">Del</button>
       </div>
     </div>
     <aside id="props">
       <button id="propsClose" title="Close">X</button>
-      <h3>Properties</h3>
-      <div id="propsBody"><p class="hint">Tap a member to edit it. Tap a node for pin / lock / delete.</p></div>
+      <div id="propsBody"></div>
     </aside>
   </div>
   <footer id="statusBar"><span id="status">Ready.</span><span id="hint"></span></footer>

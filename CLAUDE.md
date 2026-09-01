@@ -22,8 +22,10 @@ Everything in-house and dependency-free.
 ## Layout
 
 - `engine/model.js` - state, nodes, members, braces, serialize.
-  Node flags: `pinned` (infinite mass, never moves) and `locked` (angle
-  weld). The weld is implemented as hidden distance constraints between
+  Node flags: `pinned` (infinite mass, never moves - the UI calls it
+  **Anchor**) and `locked` (angle weld - the UI calls it **Weld**; do not
+  reintroduce "Pin"/"Lock" labels, "pin" means hinge in truss vocabulary
+  and confused the user). The weld is implemented as hidden distance constraints between
   the FAR endpoints of each pair of members at the locked node
   (`rebuildBraces`; pass `fromCurrent=true` when toggling mid-run so the
   weld grabs the deformed pose instead of jolting). Member rest length
@@ -43,7 +45,21 @@ Everything in-house and dependency-free.
   Gaits are chaotic-sensitive - re-run the T9 sweep before touching it.
 - `tests/run-tests.js` - `node tests/run-tests.js`, exit 0 = pass.
 - `web/app.js` - board UI, organized with section banners. World y is UP
-  in the engine; the renderer flips. `window.TF` console hooks.
+  in the engine; the renderer flips. `window.TF` console hooks (incl.
+  `select`, `undo`, `redo`, `undoDepth`).
+  - ONE properties panel (`renderProps`) for node / member / world /
+    legend, driven by `sel.kind`. The World button is `select('world')`.
+    On phones (`narrow` media query) the panel is a slide-up sheet that
+    opens for members and world but NOT for nodes (the pill is enough).
+  - Undo = JSON snapshots of `serialize(state)`; `pushUndo()` BEFORE a
+    mutation, consecutive identical snapshots collapse. Sliders push on
+    pointerdown (one entry per drag).
+  - The frame loop does not repaint while paused; every paused edit path
+    calls `draw()` itself (draw also positions the pill).
+  - Pointer position = clientX minus canvas rect (`evPos`), not offsetX:
+    synthetic PointerEvents get wrong offsetX inside the preview pane.
+  - `fitView` before the board has a size sets `pendingFit`; `resize`
+    retries. The preview pane opens tabs at 0x0 first.
 - `web/index.html` / `web/style.css` - CircuitForge tokens (--bg #0d131a,
   --accent #2f81f7 family). Toolbar groups get `flex-shrink: 0` on
   mobile so rows wrap whole groups.
@@ -83,4 +99,4 @@ Everything in-house and dependency-free.
 - Engine units: meters, kilograms, seconds; gravity default 9.81;
   ground surface at y = 0.
 - Grid snap pitch 0.25 m (`GRID` in app.js).
-- Undo is out of scope for v0.1 (roadmap).
+- Undo/redo shipped in 0.2.0 (snapshot based, depth 60).
