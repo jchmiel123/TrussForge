@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>TrussForge</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header id="toolbar">
+    <div class="brand">Truss<span>Forge</span><em id="ver">v0.1.0</em></div>
+    <div class="group">
+      <button id="runBtn" class="accent" title="Run / pause the simulation (Space)">Run</button>
+      <button id="resetBtn" title="Reset to the build pose (R)">Reset</button>
+    </div>
+    <div class="group">
+      <button id="snapBtn" class="icon active" title="Grid snap on/off (G)" aria-label="Grid snap">
+        <svg viewBox="0 0 16 16" width="16" height="16"><g fill="currentColor"><circle cx="3" cy="3" r="1.3"/><circle cx="8" cy="3" r="1.3"/><circle cx="13" cy="3" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="13" cy="8" r="1.3"/><circle cx="3" cy="13" r="1.3"/><circle cx="8" cy="13" r="1.3"/><circle cx="13" cy="13" r="1.3"/></g></svg>
+      </button>
+      <button id="gravBtn" class="icon active" title="Gravity on/off" aria-label="Gravity">
+        <svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 2 V10 M4.5 7 L8 10.5 L11.5 7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M2.5 13.5 H13.5" stroke="currentColor" stroke-width="1.8"/></svg>
+      </button>
+      <button id="followBtn" class="icon" title="Camera follows the structure" aria-label="Follow">
+        <svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><path d="M8 1 V3.5 M8 12.5 V15 M1 8 H3.5 M12.5 8 H15" stroke="currentColor" stroke-width="1.6"/></svg>
+      </button>
+    </div>
+    <div class="group">
+      <button id="worldBtn" title="World settings (gravity, friction, drag, speed)">World</button>
+    </div>
+    <div class="group" id="worldGroup">
+      <label class="inp">gravity <input type="range" id="wGrav" min="0" max="25" step="0.1"><span class="wval" id="wGravV"></span></label>
+      <label class="inp">friction <input type="range" id="wFric" min="0" max="1" step="0.01"><span class="wval" id="wFricV"></span></label>
+      <label class="inp">drag <input type="range" id="wDrag" min="0" max="2" step="0.01"><span class="wval" id="wDragV"></span></label>
+      <label class="inp">speed
+        <select id="wSpeed">
+          <option value="0.25">0.25x</option>
+          <option value="0.5">0.5x</option>
+          <option value="1" selected>1x</option>
+          <option value="2">2x</option>
+          <option value="4">4x</option>
+        </select>
+      </label>
+    </div>
+    <div class="group right">
+      <button id="saveBtn" title="Save the build to a JSON file (Ctrl+S)">Save</button>
+      <button id="openBtn" title="Open a saved build file (Ctrl+O)">Open</button>
+      <input type="file" id="openFile" accept=".json,application/json" style="display:none">
+      <select id="demoSel">
+        <option value="">Demo...</option>
+        <option value="walker">Walker</option>
+        <option value="merry">Merry-go-round</option>
+      </select>
+      <button id="clearBtn">Clear</button>
+    </div>
+  </header>
+  <div id="main">
+    <aside id="palette">
+      <div class="palItem active" data-tool="select" title="Select / move / poke (V)">
+        <svg viewBox="0 0 22 22" width="22" height="22"><path d="M5 2.5 L17.5 11 L11.7 12.3 L14.8 18.6 L12.3 19.9 L9.2 13.6 L5 17 Z" fill="currentColor"/></svg>
+        <div class="lbl">Select</div>
+      </div>
+      <div class="palItem" data-tool="node" title="Place nodes (N)">
+        <svg viewBox="0 0 22 22" width="22" height="22"><circle cx="11" cy="11" r="4" fill="currentColor"/></svg>
+        <div class="lbl">Node</div>
+      </div>
+      <div class="palItem" data-tool="beam" title="Beam: rigid stick. Drag node to node (B)">
+        <svg viewBox="0 0 22 22" width="22" height="22"><path d="M4 18 L18 4" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>
+        <div class="lbl">Beam</div>
+      </div>
+      <div class="palItem" data-tool="spring" title="Spring: passive, stiffness + damping (S)">
+        <svg viewBox="0 0 22 22" width="22" height="22"><path d="M3 19 L6 16 L8 18 L10 14 L12 16 L14 12 L16 14 L19 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        <div class="lbl">Spring</div>
+      </div>
+      <div class="palItem" data-tool="actuator" title="Actuator: a muscle - its rest length follows a waveform (A)">
+        <svg viewBox="0 0 22 22" width="22" height="22"><path d="M4 18 L9 13 M13 9 L18 4" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><rect x="8.4" y="8.4" width="5.2" height="5.2" rx="1.2" fill="currentColor"/></svg>
+        <div class="lbl">Actuator</div>
+      </div>
+      <div class="palItem" data-tool="erase" title="Erase: tap a node or member (E)">
+        <svg viewBox="0 0 22 22" width="22" height="22"><path d="M4 13 L11 6 L18 13 L14 17 H8 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 17 L15 10" stroke="currentColor" stroke-width="2"/></svg>
+        <div class="lbl">Erase</div>
+      </div>
+    </aside>
+    <div id="boardWrap">
+      <canvas id="board"></canvas>
+      <div id="nodePill" class="hidden">
+        <button id="pillPin" title="Pin: fix this node to the world">Pin</button>
+        <button id="pillLock" title="Lock: weld the angles between members meeting here">Lock</button>
+        <button id="pillDel" class="danger" title="Delete this node">Del</button>
+      </div>
+    </div>
+    <aside id="props">
+      <button id="propsClose" title="Close">X</button>
+      <h3>Properties</h3>
+      <div id="propsBody"><p class="hint">Tap a member to edit it. Tap a node for pin / lock / delete.</p></div>
+    </aside>
+  </div>
+  <footer id="statusBar"><span id="status">Ready.</span><span id="hint"></span></footer>
+</div>
+<div id="checkResult" style="display:none"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

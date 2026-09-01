@@ -13,10 +13,12 @@ export function walker() {
   const F = addNode(s, 0.9, 0.0);      // front foot
   const T = addNode(s, 0.45, 0.78);    // top / hip
   const H = addNode(s, 1.18, 0.62);    // head
-  const P = 1.4;                       // gait period, seconds
+  // Gait tuned by sweep (2026-09-01): phases 0 / 0.25 / 0.5, period 1.0 s
+  // walks forward (+x) at ~27 cm/s and stays forward for friction 0.3-1.0.
+  const P = 1.0;                       // gait period, seconds
   addMember(s, B, F, 'actuator', { wave: { type: 'sine', amp: 0.22, period: P, phase: 0.0 } });
-  addMember(s, B, T, 'actuator', { wave: { type: 'sine', amp: 0.16, period: P, phase: 0.25 } });
-  addMember(s, F, T, 'actuator', { wave: { type: 'sine', amp: 0.16, period: P, phase: 0.75 } });
+  addMember(s, B, T, 'actuator', { wave: { type: 'sine', amp: 0.20, period: P, phase: 0.25 } });
+  addMember(s, F, T, 'actuator', { wave: { type: 'sine', amp: 0.20, period: P, phase: 0.5 } });
   addMember(s, F, H, 'beam');
   addMember(s, T, H, 'beam');
   s.world.friction = 0.7;

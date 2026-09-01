@@ -103,7 +103,7 @@ function measurePeriod(state, signal, seconds) {
 
 // ---- T5: actuator length tracks its drive waveform ----------------------
 {
-  const s = createState({ world: { gravityOn: false, drag: 0.2 } });
+  const s = createState({ world: { gravityOn: false, drag: 0.2, actuatorRamp: 0 } });
   const a = addNode(s, 0, 5, { pinned: true });
   const b = addNode(s, 0.7, 5);
   const m = addMember(s, a, b, 'actuator', {
@@ -120,6 +120,10 @@ function measurePeriod(state, signal, seconds) {
     worst = Math.max(worst, Math.abs(len - want) / want);
   }
   check('T5 actuator tracks waveform (worst rel err)', worst, 0, 0.01);
+  // soft start: at t = ramp/2 the amplitude envelope is 0.5 (pure math)
+  const act = { kind: 'actuator', restLen: 1, wave: { type: 'sine', amp: 0.4, period: 2, phase: 0.25 } };
+  check('T5b actuator soft-start envelope', targetLength(act, 0.25, 1),
+    1 + 0.4 * 0.25 * Math.sin(2 * Math.PI * (0.25 / 2 + 0.25)), 1e-9);
 }
 
 // ---- T6: locked node welds the angle ------------------------------------

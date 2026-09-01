@@ -25,10 +25,14 @@ export function waveValue(w, t) {
   return Math.sin(2 * Math.PI * s);
 }
 
-// Current target length of a member at time t.
-export function targetLength(m, t) {
+// Current target length of a member at time t. ramp (seconds) fades the
+// actuator amplitude in from t=0, so a wave whose value is nonzero at
+// t=0 does not snap the rigid constraint instantly and kick the build
+// off the ground (soft start).
+export function targetLength(m, t, ramp = 0) {
   if (m.kind !== 'actuator' || !m.wave) return m.restLen;
-  const L = m.restLen * (1 + m.wave.amp * waveValue(m.wave, t));
+  const env = ramp > 0 ? Math.min(1, t / ramp) : 1;
+  const L = m.restLen * (1 + m.wave.amp * env * waveValue(m.wave, t));
   return Math.max(0.05 * m.restLen, L);
 }
 
@@ -97,7 +101,7 @@ export function step(state, dt = FIXED_DT) {
       if (m.kind === 'spring') continue;
       const a = getNode(state, m.a), b = getNode(state, m.b);
       if (!a || !b) continue;
-      relax(a, b, targetLength(m, t), 1);
+      relax(a, b, targetLength(m, t, W.actuatorRamp), 1);
     }
     for (const br of state.braces) {
       const a = getNode(state, br.a), b = getNode(state, br.b);

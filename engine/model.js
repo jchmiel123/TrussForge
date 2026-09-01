@@ -39,6 +39,7 @@ export function createState(opts = {}) {
       friction: 0.6,     // 0..1, fraction of tangential speed removed per 1/60 s of contact
       drag: 0.08,        // air drag, 1/s
       groundY: 0,
+      actuatorRamp: 0.8, // seconds to fade actuator amplitude in from t=0
       iterations: 12,    // constraint relaxation passes per step
       speed: 1,          // sim speed multiplier (web uses it; step() does not)
       ...opts.world,
@@ -64,7 +65,9 @@ export function addMember(state, a, b, kind = 'beam', opts = {}) {
   const na = getNode(state, a), nb = getNode(state, b);
   if (!na || !nb) return null;
   if (findMember(state, a, b)) return null;   // no duplicate edges
-  const restLen = Math.hypot(nb.rx - na.rx, nb.ry - na.ry);
+  // rest length from CURRENT positions: identical to the rest pose when
+  // building paused, and avoids a violent snap when adding mid-run.
+  const restLen = Math.hypot(nb.x - na.x, nb.y - na.y);
   if (restLen < 1e-6) return null;
   const m = {
     id: state.nextId++,
@@ -117,9 +120,12 @@ export function membersAt(state, nodeId) {
 
 // Rebuild the hidden bracing constraints implied by locked nodes.
 // For each locked node, every PAIR of incident members gets a distance
-// constraint between the two far endpoints, at their rest-pose distance.
+// constraint between the two far endpoints, at their rest-pose distance
+// (pass fromCurrent=true to weld at the CURRENT deformed pose instead -
+// the editor uses that when a lock is toggled while the sim runs, so the
+// weld does not jolt the structure back toward the build pose).
 // Call after any topology change or lock toggle.
-export function rebuildBraces(state) {
+export function rebuildBraces(state, fromCurrent = false) {
   state.braces = [];
   for (const n of state.nodes) {
     if (!n.locked) continue;
@@ -129,7 +135,9 @@ export function rebuildBraces(state) {
         const farA = getNode(state, inc[i].a === n.id ? inc[i].b : inc[i].a);
         const farB = getNode(state, inc[j].a === n.id ? inc[j].b : inc[j].a);
         if (!farA || !farB || farA.id === farB.id) continue;
-        const len = Math.hypot(farB.rx - farA.rx, farB.ry - farA.ry);
+        const len = fromCurrent
+          ? Math.hypot(farB.x - farA.x, farB.y - farA.y)
+          : Math.hypot(farB.rx - farA.rx, farB.ry - farA.ry);
         if (len < 1e-6) continue;
         state.braces.push({ a: farA.id, b: farB.id, len });
       }
