@@ -1,0 +1,219 @@
+// TrussForge engine - model: state, nodes, members, braces, serialize.
+// HEADLESS: no DOM, no deps. Runs in Node and the browser unchanged.
+//
+// Coordinates: y is UP, ground is the half-plane y <= 0 (ground surface
+// at y = 0). The web renderer flips y for the screen.
+//
+// Node flags (independent, 4 combinations):
+//   pinned - fixed to the world, never moves.
+//   locked - the ANGLES between all members meeting at this node are
+//            welded. Implemented by hidden bracing constraints between
+//            the far endpoints of each pair of incident members
+//            (triangle rigidity). Rebuilt by rebuildBraces().
+//
+// Member kinds:
+//   beam     - rigid stick (hard distance constraint).
+//   spring   - passive, stiffness k + damping c (soft, force-based).
+//   actuator - beam whose REST LENGTH is driven by a waveform:
+//              target = restLen * (1 + amp * wave(t)).
+
+export const MEMBER_KINDS = ['beam', 'spring', 'actuator'];
+
+export const DEFAULTS = {
+  springK: 60,        // N/m-ish (world units are meters, masses ~1 kg)
+  springC: 1.5,       // damping N*s/m
+  wave: { type: 'sine', amp: 0.2, period: 1.2, phase: 0, duty: 0.5 },
+  nodeMass: 1,
+};
+
+export function createState(opts = {}) {
+  return {
+    t: 0,
+    nodes: [],
+    members: [],
+    braces: [],          // hidden constraints from locked nodes
+    nextId: 1,
+    world: {
+      gravity: 9.81,
+      gravityOn: true,
+      friction: 0.6,     // 0..1, fraction of tangential speed removed per 1/60 s of contact
+      drag: 0.08,        // air drag, 1/s
+      groundY: 0,
+      iterations: 12,    // constraint relaxation passes per step
+      speed: 1,          // sim speed multiplier (web uses it; step() does not)
+      ...opts.world,
+    },
+  };
+}
+
+export function addNode(state, x, y, opts = {}) {
+  const n = {
+    id: state.nextId++,
+    x, y, px: x, py: y,    // current + previous (verlet)
+    rx: x, ry: y,          // rest/build pose (Reset restores this)
+    pinned: !!opts.pinned,
+    locked: !!opts.locked,
+    mass: opts.mass || DEFAULTS.nodeMass,
+  };
+  state.nodes.push(n);
+  return n;
+}
+
+export function addMember(state, a, b, kind = 'beam', opts = {}) {
+  if (a === b) return null;
+  const na = getNode(state, a), nb = getNode(state, b);
+  if (!na || !nb) return null;
+  if (findMember(state, a, b)) return null;   // no duplicate edges
+  const restLen = Math.hypot(nb.rx - na.rx, nb.ry - na.ry);
+  if (restLen < 1e-6) return null;
+  const m = {
+    id: state.nextId++,
+    a: na.id, b: nb.id,
+    kind,
+    restLen: opts.restLen ?? restLen,
+    k: opts.k ?? DEFAULTS.springK,
+    c: opts.c ?? DEFAULTS.springC,
+    wave: kind === 'actuator'
+      ? { ...DEFAULTS.wave, ...opts.wave }
+      : null,
+  };
+  state.members.push(m);
+  rebuildBraces(state);
+  return m;
+}
+
+export function getNode(state, id) {
+  if (typeof id === 'object' && id !== null) return id;
+  return state.nodes.find(n => n.id === id) || null;
+}
+
+export function getMember(state, id) {
+  return state.members.find(m => m.id === id) || null;
+}
+
+export function findMember(state, a, b) {
+  const ia = getNode(state, a).id, ib = getNode(state, b).id;
+  return state.members.find(m =>
+    (m.a === ia && m.b === ib) || (m.a === ib && m.b === ia)) || null;
+}
+
+export function removeMember(state, id) {
+  const i = state.members.findIndex(m => m.id === id);
+  if (i >= 0) state.members.splice(i, 1);
+  rebuildBraces(state);
+}
+
+export function removeNode(state, id) {
+  const nid = getNode(state, id) ? getNode(state, id).id : id;
+  state.members = state.members.filter(m => m.a !== nid && m.b !== nid);
+  const i = state.nodes.findIndex(n => n.id === nid);
+  if (i >= 0) state.nodes.splice(i, 1);
+  rebuildBraces(state);
+}
+
+export function membersAt(state, nodeId) {
+  return state.members.filter(m => m.a === nodeId || m.b === nodeId);
+}
+
+// Rebuild the hidden bracing constraints implied by locked nodes.
+// For each locked node, every PAIR of incident members gets a distance
+// constraint between the two far endpoints, at their rest-pose distance.
+// Call after any topology change or lock toggle.
+export function rebuildBraces(state) {
+  state.braces = [];
+  for (const n of state.nodes) {
+    if (!n.locked) continue;
+    const inc = membersAt(state, n.id);
+    for (let i = 0; i < inc.length; i++) {
+      for (let j = i + 1; j < inc.length; j++) {
+        const farA = getNode(state, inc[i].a === n.id ? inc[i].b : inc[i].a);
+        const farB = getNode(state, inc[j].a === n.id ? inc[j].b : inc[j].a);
+        if (!farA || !farB || farA.id === farB.id) continue;
+        const len = Math.hypot(farB.rx - farA.rx, farB.ry - farA.ry);
+        if (len < 1e-6) continue;
+        state.braces.push({ a: farA.id, b: farB.id, len });
+      }
+    }
+  }
+}
+
+// Restore the build pose (positions = rest positions, velocities = 0, t = 0).
+export function reset(state) {
+  for (const n of state.nodes) {
+    n.x = n.rx; n.y = n.ry; n.px = n.rx; n.py = n.ry;
+  }
+  state.t = 0;
+  rebuildBraces(state);
+}
+
+// Adopt the CURRENT positions as the new build pose (used by the editor
+// after dragging nodes around while paused).
+export function bakeRestPose(state) {
+  for (const n of state.nodes) { n.rx = n.x; n.ry = n.y; }
+  for (const m of state.members) {
+    const a = getNode(state, m.a), b = getNode(state, m.b);
+    m.restLen = Math.hypot(b.rx - a.rx, b.ry - a.ry);
+  }
+  rebuildBraces(state);
+}
+
+export function centroid(state) {
+  let x = 0, y = 0, k = 0;
+  for (const n of state.nodes) { x += n.x; y += n.y; k++; }
+  return k ? { x: x / k, y: y / k } : { x: 0, y: 0 };
+}
+
+// ---- serialization -------------------------------------------------------
+
+export function serialize(state) {
+  return {
+    app: 'trussforge',
+    version: 1,
+    world: { ...state.world },
+    nodes: state.nodes.map(n => ({
+      id: n.id, x: n.rx, y: n.ry,
+      pinned: n.pinned || undefined,
+      locked: n.locked || undefined,
+      mass: n.mass !== DEFAULTS.nodeMass ? n.mass : undefined,
+    })),
+    members: state.members.map(m => ({
+      id: m.id, a: m.a, b: m.b, kind: m.kind,
+      restLen: m.restLen,
+      k: m.kind === 'spring' ? m.k : undefined,
+      c: m.kind === 'spring' ? m.c : undefined,
+      wave: m.kind === 'actuator' ? { ...m.wave } : undefined,
+    })),
+  };
+}
+
+export function deserialize(doc) {
+  if (!doc || doc.app !== 'trussforge' || !Array.isArray(doc.nodes)) {
+    throw new Error('not a trussforge document');
+  }
+  const state = createState();
+  state.world = { ...state.world, ...doc.world };
+  let maxId = 0;
+  for (const d of doc.nodes) {
+    const n = {
+      id: d.id, x: d.x, y: d.y, px: d.x, py: d.y, rx: d.x, ry: d.y,
+      pinned: !!d.pinned, locked: !!d.locked,
+      mass: d.mass || DEFAULTS.nodeMass,
+    };
+    state.nodes.push(n);
+    maxId = Math.max(maxId, d.id);
+  }
+  for (const d of doc.members) {
+    const m = {
+      id: d.id, a: d.a, b: d.b, kind: d.kind,
+      restLen: d.restLen,
+      k: d.k ?? DEFAULTS.springK,
+      c: d.c ?? DEFAULTS.springC,
+      wave: d.kind === 'actuator' ? { ...DEFAULTS.wave, ...d.wave } : null,
+    };
+    state.members.push(m);
+    maxId = Math.max(maxId, d.id);
+  }
+  state.nextId = maxId + 1;
+  rebuildBraces(state);
+  return state;
+}

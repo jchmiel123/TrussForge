@@ -1,0 +1,10 @@
+{
+  "name": "trussforge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Springs-and-beams physics sandbox. Headless verlet engine + canvas web UI.",
+  "scripts": {
+    "test": "node tests/run-tests.js"
+  }
+}

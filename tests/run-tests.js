@@ -1,0 +1,254 @@
+// TrussForge test suite. Run: node tests/run-tests.js  (exit 0 = all green)
+// Every expected value comes from INDEPENDENT math (closed form), never
+// from the engine itself.
+
+import {
+  createState, addNode, addMember, reset, serialize, deserialize,
+  getNode, centroid, rebuildBraces,
+} from '../engine/model.js';
+import { step, run, waveValue, targetLength, FIXED_DT } from '../engine/sim.js';
+import { walker, merry } from '../engine/demos.js';
+
+let pass = 0, fail = 0;
+function check(name, got, want, tol) {
+  const ok = Number.isFinite(got) && Math.abs(got - want) <= tol;
+  if (ok) { pass++; console.log(`PASS  ${name}  got=${fmt(got)} want=${fmt(want)} tol=${fmt(tol)}`); }
+  else { fail++; console.log(`FAIL  ${name}  got=${fmt(got)} want=${fmt(want)} tol=${fmt(tol)}`); }
+}
+function checkTrue(name, cond, note = '') {
+  if (cond) { pass++; console.log(`PASS  ${name}${note ? '  ' + note : ''}`); }
+  else { fail++; console.log(`FAIL  ${name}${note ? '  ' + note : ''}`); }
+}
+const fmt = v => (typeof v === 'number' ? Number(v.toPrecision(6)) : v);
+const dt = FIXED_DT;
+
+// Measure oscillation period of signal(state) via successive upward zero
+// crossings (linear interpolation), averaged.
+function measurePeriod(state, signal, seconds) {
+  const crossings = [];
+  let prev = signal(state), prevT = state.t;
+  const steps = Math.round(seconds / dt);
+  for (let i = 0; i < steps; i++) {
+    step(state, dt);
+    const cur = signal(state);
+    if (prev <= 0 && cur > 0) {
+      const frac = -prev / (cur - prev);
+      crossings.push(prevT + frac * dt);
+    }
+    prev = cur; prevT = state.t;
+  }
+  if (crossings.length < 3) return NaN;
+  let sum = 0;
+  for (let i = 1; i < crossings.length; i++) sum += crossings[i] - crossings[i - 1];
+  return sum / (crossings.length - 1);
+}
+
+// ---- T1: waveforms (pure math) ------------------------------------------
+{
+  const sine = { type: 'sine', amp: 1, period: 2, phase: 0 };
+  check('T1a sine peak at t=P/4', waveValue(sine, 0.5), 1, 1e-9);
+  check('T1b sine zero at t=P/2', waveValue(sine, 1.0), 0, 1e-9);
+  const sq = { type: 'square', period: 1, phase: 0, duty: 0.3 };
+  check('T1c square high inside duty', waveValue(sq, 0.1), 1, 1e-9);
+  check('T1d square low outside duty', waveValue(sq, 0.5), -1, 1e-9);
+  const ph = { type: 'square', period: 1, phase: 0.5, duty: 0.3 };
+  check('T1e square phase shifts window', waveValue(ph, 0.6), 1, 1e-9);
+  const act = { kind: 'actuator', restLen: 2, wave: { type: 'sine', amp: 0.25, period: 1, phase: 0 } };
+  check('T1f actuator target at wave peak', targetLength(act, 0.25), 2 * 1.25, 1e-9);
+}
+
+// ---- T2: soft spring SHM frequency vs (1/2pi)sqrt(k/m) ------------------
+{
+  const k = 50, m = 1;
+  const s = createState({ world: { gravityOn: false, drag: 0, friction: 0 } });
+  const a = addNode(s, 0, 5, { pinned: true });
+  const b = addNode(s, 1, 5, { mass: m });
+  const sp = addMember(s, a, b, 'spring', { k, c: 0 });
+  b.x = 1.25; b.px = 1.25;          // displace along the axis, at rest
+  const wantT = 2 * Math.PI * Math.sqrt(m / k);       // 0.8886 s
+  const gotT = measurePeriod(s, st => getNode(st, b.id).x - 1, 8);
+  check('T2 spring SHM period 2pi*sqrt(m/k)', gotT, wantT, wantT * 0.02);
+  checkTrue('T2b spring member created', !!sp);
+}
+
+// ---- T3: small-angle pendulum period vs 2pi sqrt(L/g) -------------------
+{
+  const L = 1, g = 9.81, th0 = 0.12;
+  const s = createState({ world: { gravity: g, drag: 0, friction: 0 } });
+  const p = addNode(s, 0, 5, { pinned: true });
+  const b = addNode(s, L * Math.sin(th0), 5 - L * Math.cos(th0));
+  addMember(s, p, b, 'beam');
+  reset(s);
+  // small-angle closed form with first anharmonic correction
+  const wantT = 2 * Math.PI * Math.sqrt(L / g) * (1 + th0 * th0 / 16);
+  const gotT = measurePeriod(s, st => getNode(st, b.id).x, 12);
+  check('T3 pendulum period 2pi*sqrt(L/g)', gotT, wantT, wantT * 0.02);
+}
+
+// ---- T4: beam length invariance under gravity load ----------------------
+{
+  const s = createState();
+  const a = addNode(s, 0, 0), b = addNode(s, 1, 0), c = addNode(s, 0.5, 0.8);
+  const m1 = addMember(s, a, b, 'beam');
+  const m2 = addMember(s, b, c, 'beam');
+  const m3 = addMember(s, a, c, 'beam');
+  reset(s);
+  run(s, Math.round(3 / dt));
+  for (const [i, m] of [m1, m2, m3].entries()) {
+    const na = getNode(s, m.a), nb = getNode(s, m.b);
+    const len = Math.hypot(nb.x - na.x, nb.y - na.y);
+    check(`T4${'abc'[i]} beam strain < 0.5%`, len / m.restLen, 1, 0.005);
+  }
+}
+
+// ---- T5: actuator length tracks its drive waveform ----------------------
+{
+  const s = createState({ world: { gravityOn: false, drag: 0.2 } });
+  const a = addNode(s, 0, 5, { pinned: true });
+  const b = addNode(s, 0.7, 5);
+  const m = addMember(s, a, b, 'actuator', {
+    wave: { type: 'sine', amp: 0.2, period: 1, phase: 0 },
+  });
+  reset(s);
+  let worst = 0;
+  for (let i = 0; i < Math.round(2.5 / dt); i++) {
+    step(s, dt);
+    // independent target: 0.7 * (1 + 0.2 sin(2 pi t))
+    const want = 0.7 * (1 + 0.2 * Math.sin(2 * Math.PI * s.t));
+    const na = getNode(s, m.a), nb = getNode(s, m.b);
+    const len = Math.hypot(nb.x - na.x, nb.y - na.y);
+    worst = Math.max(worst, Math.abs(len - want) / want);
+  }
+  check('T5 actuator tracks waveform (worst rel err)', worst, 0, 0.01);
+}
+
+// ---- T6: locked node welds the angle ------------------------------------
+{
+  const build = lock => {
+    const s = createState({ world: { drag: 1.5 } });
+    const a = addNode(s, 0, 2, { pinned: true });
+    const b = addNode(s, 0, 1, { locked: lock });
+    const c = addNode(s, 1, 1);
+    addMember(s, a, b, 'beam');
+    addMember(s, b, c, 'beam');
+    reset(s);
+    run(s, Math.round(5 / dt));
+    const A = getNode(s, a.id), B = getNode(s, b.id), C = getNode(s, c.id);
+    const v1 = [A.x - B.x, A.y - B.y], v2 = [C.x - B.x, C.y - B.y];
+    const dot = v1[0] * v2[0] + v1[1] * v2[1];
+    const cr = v1[0] * v2[1] - v1[1] * v2[0];
+    return Math.abs(Math.atan2(cr, dot)) * 180 / Math.PI;
+  };
+  check('T6a locked L keeps its 90 deg angle', build(true), 90, 0.6);
+  checkTrue('T6b unlocked L folds under gravity', Math.abs(build(false) - 90) > 20,
+    `angle=${fmt(build(false))} deg`);
+}
+
+// ---- T7: pinned node never moves ----------------------------------------
+{
+  const s = merry();
+  const hub = s.nodes.find(n => n.pinned);
+  const hx = hub.x, hy = hub.y;
+  run(s, 50000);
+  check('T7a pinned hub x unchanged after 50k steps', hub.x, hx, 1e-12);
+  check('T7b pinned hub y unchanged after 50k steps', hub.y, hy, 1e-12);
+  // and the rotor actually rocks: track the angle of one spoke
+  const rim = s.nodes.find(n => !n.pinned && n.mass === 1);
+  let mn = Infinity, mx = -Infinity;
+  const s2 = merry();
+  const hub2 = s2.nodes.find(n => n.pinned);
+  const rim2 = s2.nodes.find(n => !n.pinned && n.mass === 1);
+  for (let i = 0; i < 4000; i++) {
+    step(s2, dt);
+    const ang = Math.atan2(rim2.y - hub2.y, rim2.x - hub2.x);
+    mn = Math.min(mn, ang); mx = Math.max(mx, ang);
+  }
+  checkTrue('T7c rotor rocks around the pin', (mx - mn) > 0.02,
+    `swing=${fmt((mx - mn) * 180 / Math.PI)} deg`);
+}
+
+// ---- T8: energy stays bounded over 100k steps (no explosion) ------------
+{
+  const s = walker();
+  let ok = true, maxSpeed = 0;
+  for (let i = 0; i < 100000; i++) {
+    step(s, dt);
+    if (i % 100 === 0) {
+      for (const n of s.nodes) {
+        const v = Math.hypot(n.x - n.px, n.y - n.py) / dt;
+        maxSpeed = Math.max(maxSpeed, v);
+        if (!Number.isFinite(n.x) || !Number.isFinite(n.y) || v > 50) ok = false;
+      }
+    }
+  }
+  checkTrue('T8 walker bounded over 100k steps', ok, `maxSpeed=${fmt(maxSpeed)} m/s`);
+}
+
+// ---- T9: the walker actually walks --------------------------------------
+{
+  const s = walker();
+  const x0 = centroid(s).x;
+  run(s, Math.round(20 / dt));
+  const x1 = centroid(s).x;
+  checkTrue('T9a walker advances > 0.5 m in 20 s', x1 - x0 > 0.5,
+    `dx=${fmt(x1 - x0)} m`);
+  let maxY = 0;
+  for (const n of s.nodes) maxY = Math.max(maxY, n.y);
+  checkTrue('T9b walker stays near the ground', maxY < 3, `maxY=${fmt(maxY)}`);
+}
+
+// ---- T10: ground contact ------------------------------------------------
+{
+  // a dropped node comes to rest ON the ground
+  const s = createState();
+  const n = addNode(s, 0, 1);
+  run(s, Math.round(3 / dt));
+  check('T10a dropped node rests at groundY', n.y, 0, 1e-3);
+  // with friction, a sliding node stops; frictionless keeps going
+  const slide = f => {
+    const s2 = createState({ world: { friction: f, drag: 0 } });
+    const m = addNode(s2, 0, 0);
+    m.px = m.x - 2 * dt;   // 2 m/s to the right
+    run(s2, Math.round(2 / dt));
+    return (m.x - m.px) / dt;
+  };
+  check('T10b friction stops a sliding node', slide(0.8), 0, 1e-3);
+  checkTrue('T10c frictionless node keeps sliding', slide(0) > 1.9,
+    `v=${fmt(slide(0))} m/s`);
+}
+
+// ---- T11: serialize round trip ------------------------------------------
+{
+  const s = walker();
+  run(s, 500);                        // deform it first
+  const doc = serialize(s);
+  const s2 = deserialize(JSON.parse(JSON.stringify(doc)));
+  checkTrue('T11a round trip node count', s2.nodes.length === s.nodes.length);
+  checkTrue('T11b round trip member count', s2.members.length === s.members.length);
+  const m0 = s.members[0], m2 = s2.members.find(m => m.id === m0.id);
+  check('T11c round trip actuator amp', m2.wave.amp, m0.wave.amp, 1e-12);
+  check('T11d round trip rest length', m2.restLen, m0.restLen, 1e-12);
+  // deserialized state starts at the build pose
+  checkTrue('T11e deserialized starts at rest pose',
+    s2.nodes.every(n => n.x === n.rx && n.y === n.ry));
+}
+
+// ---- T12: locked-node braces regenerate on topology change --------------
+{
+  const s = createState();
+  const hub = addNode(s, 0, 1, { locked: true });
+  const a = addNode(s, 1, 1), b = addNode(s, 0, 2), c = addNode(s, -1, 1);
+  addMember(s, hub, a, 'beam');
+  addMember(s, hub, b, 'beam');
+  checkTrue('T12a two members at locked node -> 1 brace', s.braces.length === 1);
+  addMember(s, hub, c, 'beam');
+  checkTrue('T12b three members -> 3 braces', s.braces.length === 3);
+  const brace = s.braces[0];
+  check('T12c brace rest length is far-endpoint distance',
+    brace.len, Math.hypot(1 - 0, 1 - 2), 1e-12);
+}
+
+console.log('');
+const total = pass + fail;
+console.log(`${pass}/${total} checks passed${fail ? `  (${fail} FAILED)` : ''}`);
+process.exit(fail ? 1 : 0);
