@@ -48,6 +48,20 @@ Everything in-house and dependency-free.
   --accent #2f81f7 family). Toolbar groups get `flex-shrink: 0` on
   mobile so rows wrap whole groups.
 
+## Hosting (VULCAN)
+
+- Lives on Vulcan at ~/vulcan/repos/TrussForge, served by launchd agent
+  com.vulcan.trussforge (userland python http.server, 0.0.0.0:8337,
+  repo root, KeepAlive). Open http://vulcan:8337/web/index.html - the
+  AnvilLab portal at http://vulcan/ has its card.
+- Vulcan has NO git: deploy = `git archive` locally, scp the tarball,
+  extract over ~/vulcan/repos/TrussForge. Static files - no restart
+  needed. Restart anyway: `ssh vulcan "launchctl kickstart -k
+  gui/$(id -u)/com.vulcan.trussforge"`.
+- Portal card lives in ~/vulcan/repos/AnvilLab/server.py (SERVICES
+  list) + the icon map in its index.html; restart com.vulcan.anvillab
+  after editing.
+
 ## Dev workflow
 
 - Serve over http (`python -m http.server 8341`) - file:// blocks ES
