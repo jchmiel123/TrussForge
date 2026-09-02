@@ -16,7 +16,7 @@ import { snapToLattice, forEachLatticePoint, rowHeight, rowOffset, PITCHES } fro
 // CONFIG / VERSION
 // ============================================================
 
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.8.0';
 const BUILD_DATE = '2026-09-02';
 const PREFS_KEY = 'trussforge.prefs';
 const NODE_R = 0.055;         // node draw radius, meters
@@ -260,6 +260,13 @@ function drawMember(m) {
     ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
   }
+  if (m.solid) {
+    // solid = things collide with it: a pale hard edge around the member
+    ctx.strokeStyle = 'rgba(232, 240, 250, .55)';
+    ctx.lineWidth = w + 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
   ctx.lineCap = 'round';
   if (m.kind === 'beam') {
     ctx.strokeStyle = col || '#8b9cb6';
@@ -272,25 +279,37 @@ function drawMember(m) {
   }
 }
 
+// Coil spring: the number of turns comes from the REST length (so the
+// drawing is stable while it stretches and the coils visibly open and
+// close), the turn count is even so the shape is symmetric end to end,
+// and a faint core line keeps a stretched spring reading as one member.
 function drawSpring(x1, y1, x2, y2, m, col) {
   const dx = x2 - x1, dy = y2 - y1;
   const len = Math.hypot(dx, dy) || 1;
   const ux = dx / len, uy = dy / len;       // axis
   const nx = -uy, ny = ux;                  // normal
-  const zigs = 8;
-  const ampPx = Math.max(3, 0.05 * cam.zoom);
-  const lead = Math.min(len * 0.15, 10);    // straight leads at the ends
-  ctx.strokeStyle = col || '#58a6ff';
-  ctx.lineWidth = Math.max(1.5, 0.028 * cam.zoom) * (col ? 1.4 : 1);
-  ctx.lineJoin = 'round';
+  const turns = Math.max(3, Math.min(24, Math.round((m.restLen || len / cam.zoom) / 0.08)));
+  const half = turns * 2;                   // half-turns = zig vertices + 1
+  const amp = Math.max(2.5, 0.038 * cam.zoom);
+  const lead = Math.min(len * 0.12, Math.max(4, 0.07 * cam.zoom));
+  const span = len - 2 * lead;
+  const color = col || '#58a6ff';
+  // faint core
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.28;
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  ctx.globalAlpha = 1;
+  // coil
+  ctx.lineWidth = Math.max(1.4, 0.022 * cam.zoom) * (col ? 1.4 : 1);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(x1, y1);
   ctx.lineTo(x1 + ux * lead, y1 + uy * lead);
-  const span = len - 2 * lead;
-  for (let i = 1; i < zigs; i++) {
-    const t = lead + span * (i / zigs);
+  for (let i = 1; i < half; i++) {
+    const t = lead + span * (i / half);
     const side = (i % 2 ? 1 : -1);
-    ctx.lineTo(x1 + ux * t + nx * ampPx * side, y1 + uy * t + ny * ampPx * side);
+    ctx.lineTo(x1 + ux * t + nx * amp * side, y1 + uy * t + ny * amp * side);
   }
   ctx.lineTo(x2 - ux * lead, y2 - uy * lead);
   ctx.lineTo(x2, y2);
@@ -336,20 +355,21 @@ function drawNode(n) {
     ctx.fillStyle = 'rgba(47, 129, 247, .35)';
     ctx.beginPath(); ctx.arc(x, y, r + 7, 0, 7); ctx.fill();
   }
-  if (n.pinned) {
-    // anchored: a support triangle + ground line under the node, the
-    // way a fixed support is drawn on a structural diagram
+  if (n.pinned && !running) {
+    // anchored: a small support triangle + ground line under the node
+    // (structural-diagram style). Only while paused - while running the
+    // gold node is enough and the symbol just clutters the motion.
     ctx.strokeStyle = '#e3b341';
     ctx.fillStyle = 'rgba(227, 179, 65, .18)';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x - r - 6, y + r + 9);
-    ctx.lineTo(x + r + 6, y + r + 9);
+    ctx.moveTo(x, y + r * 0.6);
+    ctx.lineTo(x - r - 2, y + r + 6);
+    ctx.lineTo(x + r + 2, y + r + 6);
     ctx.closePath();
     ctx.fill(); ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(x - r - 10, y + r + 13); ctx.lineTo(x + r + 10, y + r + 13);
+    ctx.moveTo(x - r - 5, y + r + 9); ctx.lineTo(x + r + 5, y + r + 9);
     ctx.stroke();
   }
   ctx.fillStyle = n.pinned ? '#e3b341' : '#d3dce6';
@@ -921,6 +941,7 @@ const LEGEND_HTML = `
   <p><span class="sw" style="background:#58a6ff"></span><b>Spring</b> - stretchy; stiffness and damping.</p>
   <p><span class="sw" style="background:#e3b341"></span><b>Actuator</b> - a muscle. Its length follows a wave. Give muscles different phases to make a gait.</p>
   <p><b>Anchor</b> - fixes a node to the world.</p>
+  <p><b>Solid</b> (member panel) - a member other bodies land on and slide along. Pass-through by default. Anchored solid beams = ramps and platforms.</p>
   <p><b>Weld</b> - members meeting at a node keep their angles (rigid joint).</p>
   <p><b>Grid</b> button: square or triangle lattice, pitch, brightness (<kbd>[</kbd> <kbd>]</kbd> change pitch). Per device, not saved with builds.</p>
   <p><b>Group</b> tool: box-select nodes, then copy / paste / mirror / move them. "Select body" on a node or member grabs the whole creature.</p>
@@ -944,7 +965,8 @@ const TIPS = {
   wtype: 'sine = smooth push/pull. square = snaps between long and short.',
   amp: 'How far the length swings, as a fraction of rest length (+/-).',
   period: 'Seconds per cycle. All muscles share one clock.',
-  phase: 'Offset into the cycle (0-1). 0.5 = the opposite of a phase-0 muscle.',
+  phase: 'Offset into the cycle. Stops at 1/24 steps so 1/2, 1/3, 1/4, 1/6, 1/8 and 1/12 land exactly. 1/2 = opposite of a phase-0 muscle.',
+  solid: 'Solid members are surfaces: nodes of OTHER bodies land on them and slide with friction. Default is pass-through. Build ramps and platforms from anchored solid beams.',
   duty: 'Fraction of each cycle spent long (square wave only).',
   mass: 'Heavier nodes swing harder and sink into springs more.',
   anchor: 'Anchor: fixed to the world, never moves. Good for hanging things and pivots.',
@@ -1004,6 +1026,8 @@ function renderMemberProps(m) {
   rows.push(`<div class="propTitle">${title}</div>`);
   rows.push(`<p class="desc">${MEMBER_DESC[m.kind]}</p>`);
   rows.push(propSelect('kind', 'type', ['beam', 'spring', 'actuator'], m.kind));
+  rows.push(`<div class="toggles" data-tip="${TIPS.solid}" title="${TIPS.solid}">
+    <button id="mSolid" class="${m.solid ? 'active' : ''}">${m.solid ? 'Solid: things collide with it' : 'Pass-through (tap for solid)'}</button></div>`);
   // a freeform build can be longer than the default range: widen it
   const lenMax = Math.max(4, Math.ceil(m.restLen * 1.5 * 20) / 20);
   rows.push(propSlider('restLen', 'rest length', 0.1, lenMax, 0.05, m.restLen, 'm'));
@@ -1015,7 +1039,7 @@ function renderMemberProps(m) {
     rows.push(propSelect('wtype', 'waveform', ['sine', 'square'], m.wave.type));
     rows.push(propSlider('amp', 'amplitude', 0, 0.45, 0.01, m.wave.amp, '+/-'));
     rows.push(propSlider('period', 'period', 0.2, 4, 0.05, m.wave.period, 's'));
-    rows.push(propSlider('phase', 'phase', 0, 1, 0.05, m.wave.phase, ''));
+    rows.push(propSlider('phase', 'phase', 0, 1, 1 / 24, m.wave.phase, ''));
     if (m.wave.type === 'square') {
       rows.push(propSlider('duty', 'duty cycle', 0.05, 0.95, 0.05, m.wave.duty, ''));
     }
@@ -1038,6 +1062,13 @@ function renderMemberProps(m) {
     if (m.wave.type === 'square') wireProp('duty', v => { m.wave.duty = v; });
   }
   wireSel('kind', v => { changeKind(m, v); });
+  $('mSolid').addEventListener('click', () => {
+    pushUndo();
+    m.solid = !m.solid;
+    markDirty(); renderProps();
+    setStatus(m.solid ? 'Solid: nodes of other bodies now bounce off and slide on this member.' : 'Pass-through: nothing collides with this member.');
+    if (!running) draw();
+  });
   $('mDel').addEventListener('click', () => {
     pushUndo();
     removeMember(state, m.id);
@@ -1142,7 +1173,7 @@ function renderWorldProps() {
 function propSlider(id, label, min, max, stepv, val, unit) {
   const tip = TIPS[id] || '';
   return `<div class="propRow" data-tip="${tip}" title="${tip}">
-    <label for="pp_${id}">${label} <span class="pv" id="pv_${id}" data-unit="${unit}">${fmtVal(val)} ${unit}</span></label>
+    <label for="pp_${id}">${label} <span class="pv" id="pv_${id}" data-unit="${unit}">${id === 'phase' ? fmtPhase(val) : fmtVal(val) + ' ' + unit}</span></label>
     <input type="range" id="pp_${id}" min="${min}" max="${max}" step="${stepv}" value="${val}"></div>`;
 }
 function propSelect(id, label, opts, val, show = o => o) {
@@ -1158,7 +1189,7 @@ function wireProp(id, fn) {
   el.addEventListener('input', () => {
     const v = parseFloat(el.value);
     const pv = $('pv_' + id);
-    pv.textContent = fmtVal(v) + ' ' + pv.dataset.unit;
+    pv.textContent = id === 'phase' ? fmtPhase(v) : fmtVal(v) + ' ' + pv.dataset.unit;
     fn(v);
     markDirty();
     if (!running) draw();
@@ -1169,6 +1200,14 @@ function wireSel(id, fn) {
   el.addEventListener('change', () => { pushUndo(); fn(el.value); markDirty(); if (!running) draw(); });
 }
 const fmtVal = v => (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2));
+// phase detents are 1/24 of a cycle: show the reduced fraction + degrees
+function fmtPhase(v) {
+  let k = Math.round(v * 24), d = 24;
+  if (k === 0 || k === 24) return '0 (0 deg)';
+  const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+  const g = gcd(k, d); k /= g; d /= g;
+  return `${k}/${d} (${Math.round(v * 360)} deg)`;
+}
 
 function changeKind(m, kind) {
   m.kind = kind;
@@ -1196,7 +1235,8 @@ runBtn.addEventListener('click', () => setRunning(!running));
 
 $('resetBtn').addEventListener('click', () => {
   reset(state);
-  setStatus('Reset to build pose.');
+  if (running) setRunning(false);      // reset means "stop and go back", not "restart"
+  setStatus('Reset to build pose. Paused.');
   updateForceReadout();
   draw();
 });

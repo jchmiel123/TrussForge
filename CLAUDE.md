@@ -41,6 +41,11 @@ Everything in-house and dependency-free.
   restitution 0 + Coulomb friction, tangential POSITION correction capped
   at mu * `_gn` (position, not velocity-only: velocity-only let planted
   feet creep a*dt^2 per step, T13e). `world.friction` IS mu (0..2).
+  Solid members (`m.solid`): `collideNodeSegment` in the relaxation
+  loop keeps non-excluded nodes CONTACT_R from the segment (PBD point-
+  segment, mass-weighted); exclusion = endpoints + direct neighbours;
+  n._cn / n._ct feed step 4b (Coulomb cap + inelastic impulse shared
+  with the endpoints - a node-only velocity kill broke momentum, T18e).
   `memberForce(m)`: springs = k*ext + c*vrel; rigid members = summed
   relax() lambdas / dt^2 (+tension). Statics tests T14 - keep a loaded
   test node OFF the ground or the floor carries part of the load.

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.0 - 2026-09-02
+
+Solid members (contact), phase detents, spring + anchor graphics, Reset
+pauses. 78/78 tests.
+
+- Engine: member flag `solid` (default false = pass-through). Nodes of
+  other bodies keep CONTACT_R (6 cm) from a solid member: point-segment
+  PBD constraint, mass-weighted, with the same Coulomb friction cap and
+  restitution-0 rule as the floor, applied as a mass-weighted inelastic
+  impulse so momentum is conserved. A member's own endpoints and their
+  direct neighbours never collide with it (no self-jamming). Saved,
+  copied and pasted with the member. Tests T18a-h: rests at y +
+  CONTACT_R, pass-through falls, sliding stops in v0^2/(2 mu g), a fully
+  solid walker walks identically, momentum conserved, round trips.
+- Member panel: Solid / Pass-through toggle; solid members draw with a
+  pale hard edge. Build ramps and platforms from anchored solid beams.
+- Phase slider stops every 1/24 cycle (1/2, 1/3, 1/4, 1/6, 1/8, 1/12 all
+  land exactly); readout shows the fraction and degrees.
+- Spring drawn as a proper coil: turn count from rest length (stable
+  while it stretches), symmetric ends, faint core line.
+- Anchor symbol smaller and hidden while running (gold node remains).
+- Reset now pauses the sim.
+
 ## 0.7.0 - 2026-09-02
 
 Grid settings: lattice types, pitch set, brightness. 70/70 tests.

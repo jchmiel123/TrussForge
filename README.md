@@ -32,6 +32,9 @@ load with the force view on.
     held - a rigid joint. Round nodes are free hinges. Needs 2+ members
     to do anything. (Engine field: `locked`.)
 - **Beam** - rigid stick.
+- Any member can be **Solid** (member panel): nodes of other bodies land
+  on it and slide along it with friction. Default is pass-through.
+  Anchored solid beams make ramps, walls and platforms.
 - **Spring** - passive, stiffness + damping sliders.
 - **Actuator** - the muscle: a beam whose REST LENGTH follows a waveform.
   Per actuator: sine or square (with duty cycle), amplitude (+/- fraction
@@ -92,7 +95,8 @@ load with the force view on.
   boundedness, pinned-node immobility, Coulomb stopping distance (two
   gravities, two masses), zero grip when unloaded, static hold, walker
   locomotion at grip 0.3 and 2.0, hopper, member force vs statics
-  (hanging / standing mass, spring, two-bar truss) - all against
+  (hanging / standing mass, spring, two-bar truss), solid-member contact
+  (rest height, stopping distance, momentum conservation) - all against
   independent closed-form math. `node tests/run-tests.js`, exit 0 = green.
 
 ## Headless verification hooks

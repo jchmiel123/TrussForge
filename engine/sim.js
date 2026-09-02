@@ -18,6 +18,15 @@
 //      exactly mu * g, so v0^2 / (2 mu g) is the stopping distance.
 // Pinned nodes have infinite mass: they never move.
 //
+// Solid members (m.solid): inside the relaxation loop every node that is
+// not an endpoint / direct neighbour of the member is kept CONTACT_R
+// away from the segment (point-segment PBD constraint, mass-weighted
+// between the node and the two endpoints). The node's normal
+// correction accumulates in n._cn and the last contact frame is kept in
+// n._ct so step 4 can apply the same Coulomb cap and restitution-0 rule
+// as the ground: a node resting on an anchored solid beam behaves
+// exactly like one resting on the floor (T18 checks the closed forms).
+//
 // Member force (memberForce): springs report k*ext + c*vrel directly.
 // For rigid members the relaxation corrections ARE the impulses the
 // member applied this step: relax() returns lambda = (dist - target) /
@@ -29,6 +38,7 @@
 import { getNode } from './model.js';
 
 export const FIXED_DT = 1 / 240;
+export const CONTACT_R = 0.06;   // node vs solid-member contact distance, m
 
 // Waveform value in [-1, 1]. phase is a fraction of the period (0..1).
 export function waveValue(w, t) {
@@ -119,7 +129,19 @@ export function step(state, dt = FIXED_DT) {
   // --- 3. constraint relaxation -------------------------------------------
   const iters = Math.max(1, W.iterations | 0);
   const gy = W.groundY;
-  for (const n of nodes) n._gn = 0;      // normal correction from the ground this step
+  for (const n of nodes) { n._gn = 0; n._cn = 0; n._ct = null; }
+  // solid members: exclusion sets (endpoints + their direct neighbours)
+  let solids = null;
+  for (const m of state.members) {
+    if (!m.solid) continue;
+    if (!solids) solids = [];
+    const ex = new Set([m.a, m.b]);
+    for (const o of state.members) {
+      if (o.a === m.a || o.a === m.b) ex.add(o.b);
+      if (o.b === m.a || o.b === m.b) ex.add(o.a);
+    }
+    solids.push({ m, ex });
+  }
   for (let it = 0; it < iters; it++) {
     for (const m of state.members) {
       if (m.kind === 'spring') continue;
@@ -132,6 +154,16 @@ export function step(state, dt = FIXED_DT) {
       if (!a || !b) continue;
       relax(a, b, br.len, 1);
     }
+    if (solids) {
+      for (const { m, ex } of solids) {
+        const a = getNode(state, m.a), b = getNode(state, m.b);
+        if (!a || !b) continue;
+        for (const n of nodes) {
+          if (ex.has(n.id) || n.pinned) continue;
+          collideNodeSegment(n, a, b);
+        }
+      }
+    }
     for (const n of nodes) {
       if (!n.pinned && n.y < gy) { n._gn += gy - n.y; n.y = gy; }
     }
@@ -141,6 +173,29 @@ export function step(state, dt = FIXED_DT) {
   const invDt2 = 1 / (dt * dt);
   for (const m of state.members) {
     if (m.kind !== 'spring') m._f = m._lam * invDt2;
+  }
+
+  // --- 4b. solid-member contact response (same rules as the ground) --------
+  const mu0 = Math.max(0, W.friction);
+  for (const n of nodes) {
+    const c = n._ct;
+    if (!c || n.pinned) continue;
+    // relative displacement vs the contact point on the segment this step
+    const rvx = (n.x - n.px) - c.svx, rvy = (n.y - n.py) - c.svy;
+    const vn = rvx * c.nx + rvy * c.ny;
+    // restitution 0: kill the relative normal velocity with a mass-
+    // weighted impulse shared by the node and the beam's endpoints
+    // (perfectly inelastic - momentum is conserved, T18e)
+    const J = vn / c.denom;
+    n.px += c.wn * J * c.nx; n.py += c.wn * J * c.ny;
+    c.a.px -= c.wa * (1 - c.t) * J * c.nx; c.a.py -= c.wa * (1 - c.t) * J * c.ny;
+    c.b.px -= c.wb * c.t * J * c.nx;       c.b.py -= c.wb * c.t * J * c.ny;
+    // Coulomb: tangential correction capped at mu * normal correction
+    const tx = -c.ny, ty = c.nx;
+    const vt = rvx * tx + rvy * ty;
+    const cut = Math.min(Math.abs(vt), mu0 * n._cn);
+    n.x -= Math.sign(vt) * cut * tx;
+    n.y -= Math.sign(vt) * cut * ty;
   }
 
   // --- 4. ground velocity response ----------------------------------------
@@ -162,6 +217,45 @@ export function step(state, dt = FIXED_DT) {
     }
   }
   return state;
+}
+
+// Keep node n at least CONTACT_R from segment a-b (point-segment PBD).
+// Mass-weighted: a heavy node pushes a light beam aside. Records the
+// node's normal correction (n._cn) and contact frame (n._ct) for the
+// friction / restitution pass.
+function collideNodeSegment(n, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const l2 = dx * dx + dy * dy;
+  if (l2 < 1e-12) return;
+  let t = ((n.x - a.x) * dx + (n.y - a.y) * dy) / l2;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const cx = a.x + t * dx, cy = a.y + t * dy;
+  let ex = n.x - cx, ey = n.y - cy;
+  const dist = Math.hypot(ex, ey);
+  if (dist >= CONTACT_R) return;
+  let nx, ny;
+  if (dist > 1e-9) { nx = ex / dist; ny = ey / dist; }
+  else {
+    // exactly on the line: push toward the side the node came from
+    const len = Math.sqrt(l2);
+    nx = -dy / len; ny = dx / len;
+    const side = (n.px - cx) * nx + (n.py - cy) * ny;
+    if (side < 0) { nx = -nx; ny = -ny; }
+  }
+  const wn = invMass(n), wa = invMass(a), wb = invMass(b);
+  const denom = wn + wa * (1 - t) * (1 - t) + wb * t * t;
+  if (denom === 0) return;
+  const lam = (CONTACT_R - dist) / denom;
+  n.x += wn * lam * nx; n.y += wn * lam * ny;
+  a.x -= wa * (1 - t) * lam * nx; a.y -= wa * (1 - t) * lam * ny;
+  b.x -= wb * t * lam * nx; b.y -= wb * t * lam * ny;
+  n._cn += wn * lam;
+  n._ct = {
+    nx, ny, a, b, t, wn, wa, wb, denom,
+    // velocity (per step) of the contact point on the segment
+    svx: (a.x - a.px) * (1 - t) + (b.x - b.px) * t,
+    svy: (a.y - a.py) * (1 - t) + (b.y - b.py) * t,
+  };
 }
 
 // Run n fixed steps.

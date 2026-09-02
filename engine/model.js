@@ -11,6 +11,11 @@
 //            the far endpoints of each pair of incident members
 //            (triangle rigidity). Rebuilt by rebuildBraces().
 //
+// Member flag `solid` (default false = pass-through): nodes of OTHER
+// bodies collide with a solid member (sim.js). Build ramps, walls and
+// platforms out of anchored solid beams. Nodes of the member itself and
+// their direct neighbours never collide with it (no self-jamming).
+//
 // Member kinds:
 //   beam     - rigid stick (hard distance constraint).
 //   spring   - passive, stiffness k + damping c (soft, force-based).
@@ -73,6 +78,7 @@ export function addMember(state, a, b, kind = 'beam', opts = {}) {
     id: state.nextId++,
     a: na.id, b: nb.id,
     kind,
+    solid: !!opts.solid,
     restLen: opts.restLen ?? restLen,
     k: opts.k ?? DEFAULTS.springK,
     c: opts.c ?? DEFAULTS.springC,
@@ -199,6 +205,7 @@ export function extractSub(state, ids) {
   }));
   const members = state.members.filter(m => set.has(m.a) && set.has(m.b)).map(m => ({
     a: m.a, b: m.b, kind: m.kind, restLen: m.restLen,
+    solid: m.solid || undefined,
     k: m.kind === 'spring' ? m.k : undefined,
     c: m.kind === 'spring' ? m.c : undefined,
     wave: m.kind === 'actuator' ? { ...m.wave } : undefined,
@@ -231,7 +238,7 @@ export function insertSub(state, frag, dx = 0, dy = 0) {
   }
   for (const d of frag.members) {
     addMember(state, map.get(d.a), map.get(d.b), d.kind, {
-      restLen: d.restLen, k: d.k, c: d.c, wave: d.wave,
+      restLen: d.restLen, k: d.k, c: d.c, wave: d.wave, solid: !!d.solid,
     });
   }
   rebuildBraces(state);
@@ -285,6 +292,7 @@ export function serialize(state) {
     })),
     members: state.members.map(m => ({
       id: m.id, a: m.a, b: m.b, kind: m.kind,
+      solid: m.solid || undefined,
       restLen: m.restLen,
       k: m.kind === 'spring' ? m.k : undefined,
       c: m.kind === 'spring' ? m.c : undefined,
@@ -312,6 +320,7 @@ export function deserialize(doc) {
   for (const d of doc.members) {
     const m = {
       id: d.id, a: d.a, b: d.b, kind: d.kind,
+      solid: !!d.solid,
       restLen: d.restLen,
       k: d.k ?? DEFAULTS.springK,
       c: d.c ?? DEFAULTS.springC,

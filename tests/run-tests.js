@@ -7,7 +7,7 @@ import {
   getNode, centroid, rebuildBraces,
   componentOf, extractSub, insertSub, mirrorSub, translateSub, fragmentBounds,
 } from '../engine/model.js';
-import { step, run, waveValue, targetLength, memberForce, FIXED_DT } from '../engine/sim.js';
+import { step, run, waveValue, targetLength, memberForce, FIXED_DT, CONTACT_R } from '../engine/sim.js';
 import { walker, hopper, bridge, merry } from '../engine/demos.js';
 import { snapToLattice, forEachLatticePoint, rowHeight } from '../engine/lattice.js';
 
@@ -464,6 +464,71 @@ function measurePeriod(state, signal, seconds) {
   // negative rows keep the odd-row shift (j & 1 works for negatives)
   const t3 = snapToLattice('tri', 1, 0.5, -h);
   check('T17g tri snap below ground keeps row shift', t3.x, 0.5, 1e-12);
+}
+
+// ---- T18: solid members (node vs member contact) -------------------------
+{
+  const g = 9.81;
+  const platform = (solid, x0 = -5, x1 = 5, y = 0.5, mu = 0.7) => {
+    const s = createState({ world: { gravity: g, friction: mu, drag: 0 } });
+    const a = addNode(s, x0, y, { pinned: true }), b = addNode(s, x1, y, { pinned: true });
+    addMember(s, a, b, 'beam', { solid });
+    return s;
+  };
+  // a) a dropped node rests ON a solid beam, CONTACT_R above its axis
+  {
+    const s = platform(true);
+    const n = addNode(s, 0, 1.2);
+    run(s, Math.round(3 / dt));
+    check('T18a node rests on a solid beam at y + CONTACT_R', n.y, 0.5 + CONTACT_R, 2e-3);
+  }
+  // b) the same beam, pass-through (default): the node falls to the ground
+  {
+    const s = platform(false);
+    const n = addNode(s, 0, 1.2);
+    run(s, Math.round(3 / dt));
+    check('T18b pass-through beam lets the node fall to the floor', n.y, 0, 1e-3);
+  }
+  // c) Coulomb on a solid beam: stopping distance v0^2 / (2 mu g), like the floor
+  {
+    const s = platform(true, -5, 5, 0.5, 0.5);
+    const n = addNode(s, 0, 0.5 + CONTACT_R);
+    n.px = n.x - 2 * dt;
+    run(s, Math.round(4 / dt));
+    check('T18c sliding on a solid beam stops in v0^2/(2 mu g)', n.x, 4 / (2 * 0.5 * g), 0.03);
+  }
+  // d) no self-collision: a walker whose members are ALL solid walks
+  //    identically (its own nodes are endpoints or neighbours of every member)
+  {
+    const w1 = walker(), w2 = walker();
+    for (const m of w2.members) m.solid = true;
+    run(w1, Math.round(10 / dt)); run(w2, Math.round(10 / dt));
+    check('T18d solid members never jam their own body', centroid(w2).x, centroid(w1).x, 1e-12);
+  }
+  // e) a light beam is pushed by a heavy node (mass weighting): free
+  //    2-node solid beam in zero g, a 4 kg node arriving from above
+  //    pushes it down and keeps going slower - momentum is conserved
+  {
+    const s = createState({ world: { gravityOn: false, drag: 0, friction: 0 } });
+    const a = addNode(s, -0.5, 0.5, { mass: 0.5 }), b = addNode(s, 0.5, 0.5, { mass: 0.5 });
+    addMember(s, a, b, 'beam', { solid: true });
+    const n = addNode(s, 0, 1.0, { mass: 4 });
+    n.py = n.y + 1.0 * dt;   // 1 m/s downward
+    run(s, Math.round(0.6 / dt));
+    const vy = nd => (nd.y - nd.py) / dt;
+    const pTotal = 4 * vy(n) + 0.5 * vy(a) + 0.5 * vy(b);
+    check('T18e momentum conserved in a node-beam collision', pTotal, -4 * 1.0, 0.05);
+    checkTrue('T18f beam was pushed down by the node', a.y < 0.45, `beam y=${fmt(a.y)}`);
+  }
+  // g) solid survives save / load and copy / paste
+  {
+    const s = platform(true);
+    const s2 = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+    checkTrue('T18g solid flag round-trips through save', s2.members[0].solid === true);
+    const frag = extractSub(s, s.nodes.map(n => n.id));
+    const s3 = createState(); insertSub(s3, frag, 0, 0);
+    checkTrue('T18h solid flag survives copy / paste', s3.members[0].solid === true);
+  }
 }
 
 console.log('');
