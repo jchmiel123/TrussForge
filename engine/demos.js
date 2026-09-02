@@ -75,4 +75,49 @@ export function hopper() {
   return s;
 }
 
-export const DEMOS = { walker, hopper, merry };
+// A Warren truss bridge over a 4 m gap: bottom chord at y = 1, top chord
+// 0.8 m up, zig-zag diagonals. Left end anchored; right end hangs from a
+// short link off an anchored pier - a rocker bearing, so the span is
+// simply supported. (Anchoring BOTH ends makes it a two-hinged arch: the
+// abutments push inward and the end bays of the bottom chord go into
+// compression - T15b caught that.) A 4 kg load pumps at mid-span on a
+// slow actuator so the stress pattern breathes. Meant for the force
+// view: bottom chord red (tension), top chord blue (compression),
+// diagonals alternating - the textbook picture.
+export function bridge() {
+  const s = createState();
+  const y0 = 1.0, h = 0.8, bay = 1.0, bays = 4;
+  const bot = [], top = [];
+  for (let i = 0; i <= bays; i++) {
+    bot.push(addNode(s, i * bay, y0, { pinned: i === 0, mass: 0.5 }));
+  }
+  for (let i = 0; i < bays; i++) {
+    top.push(addNode(s, (i + 0.5) * bay, y0 + h, { mass: 0.5 }));
+  }
+  for (let i = 0; i < bays; i++) addMember(s, bot[i], bot[i + 1], 'beam');   // bottom chord
+  for (let i = 0; i < bays - 1; i++) addMember(s, top[i], top[i + 1], 'beam'); // top chord
+  for (let i = 0; i < bays; i++) {                                           // diagonals
+    addMember(s, bot[i], top[i], 'beam');
+    addMember(s, top[i], bot[i + 1], 'beam');
+  }
+  // rocker bearing: the right end hangs from an anchored pier top
+  const pier = addNode(s, bays * bay, y0 + 0.5, { pinned: true });
+  addMember(s, pier, bot[bays], 'beam');
+  const mid = bot[bays / 2];
+  const load = addNode(s, mid.x, mid.y - 0.6, { mass: 4 });
+  addMember(s, mid, load, 'actuator', {
+    wave: { type: 'sine', amp: 0.3, period: 1.6, phase: 0 },
+  });
+  reset(s);
+  return s;
+}
+
+export const DEMOS = { walker, hopper, bridge, merry };
+
+// UI hints per demo (the engine ignores these).
+export const DEMO_HINTS = {
+  walker: { status: 'Walker: three muscles, phased. Press Run.' },
+  hopper: { status: 'Hopper: same body, driven hard. Press Run.' },
+  bridge: { forceView: true, status: 'Bridge: red members pull, blue members push. Tap one for its force.' },
+  merry: { status: 'Merry-go-round: anchored, welded hub. Press Run.' },
+};

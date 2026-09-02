@@ -45,7 +45,12 @@ Everything in-house and dependency-free.
   world.actuatorRamp soft start - without it, a wave that is nonzero at
   t=0 snaps the rigid constraint in one step and kicks the build off
   the ground (that was a real bug, do not remove).
-- `engine/demos.js` - walker + hopper + merry. Walker gait (period 0.8,
+- `engine/demos.js` - walker + hopper + bridge + merry (+ `DEMO_HINTS`
+  for the UI: status text, forceView). Bridge = 4-bay Warren truss at
+  y=1 (nothing touches the ground), LEFT end anchored, RIGHT end on a
+  hanger link from an anchored pier = rocker bearing. Do not anchor both
+  ends: that is a two-hinged arch and the end bays flip to compression
+  (T15 checks chord signs). Walker gait (period 0.8,
   amps 0.30/0.18, phases 0/0.05/0.6) was tuned by sweep for the Coulomb
   model: forward for grip 0.3-2.0, < 2 % airborne. Hopper = same body,
   bounding. Gaits are chaotic-sensitive - re-run a sweep (score = WORST

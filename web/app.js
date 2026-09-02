@@ -8,13 +8,13 @@ import {
   serialize, deserialize, centroid, DEFAULTS,
 } from '../engine/model.js';
 import { step, memberForce, FIXED_DT } from '../engine/sim.js';
-import { DEMOS } from '../engine/demos.js';
+import { DEMOS, DEMO_HINTS } from '../engine/demos.js';
 
 // ============================================================
 // CONFIG / VERSION
 // ============================================================
 
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.5.0';
 const BUILD_DATE = '2026-09-02';
 const GRID = 0.25;            // snap pitch, meters
 const NODE_R = 0.055;         // node draw radius, meters
@@ -1039,7 +1039,9 @@ function loadDemo(name, { keepUndo = true } = {}) {
   select(null);
   syncToolbar();
   fitView();
-  setStatus(`Demo: ${name}.`);
+  const hint = DEMO_HINTS[name] || {};
+  if (hint.forceView && !strainOn) $('strainBtn').click();
+  setStatus(hint.status || `Demo: ${name}.`);
   draw();
   return true;
 }
@@ -1060,7 +1062,6 @@ function handleParams() {
       setStatus('Restored your last build.');
     } else {
       loadDemo('walker', { keepUndo: false });
-      setStatus('Demo: walker. Press Run.');
     }
   }
 

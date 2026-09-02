@@ -7,7 +7,7 @@ import {
   getNode, centroid, rebuildBraces,
 } from '../engine/model.js';
 import { step, run, waveValue, targetLength, memberForce, FIXED_DT } from '../engine/sim.js';
-import { walker, hopper, merry } from '../engine/demos.js';
+import { walker, hopper, bridge, merry } from '../engine/demos.js';
 
 let pass = 0, fail = 0;
 function check(name, got, want, tol) {
@@ -362,6 +362,35 @@ function measurePeriod(state, signal, seconds) {
     run(s, Math.round(1 / dt));
     check('T14f unloaded beam reads ~0', memberForce(m), 0, 0.05);
   }
+}
+
+// ---- T15: bridge demo - simply supported truss statics -------------------
+{
+  // Under a downward load the top chord of a simply supported truss is in
+  // compression and the bottom chord in tension (closed-form sign result).
+  const s = bridge();
+  const ends = s.nodes.filter(n => n.pinned).map(n => [n.x, n.y]);
+  run(s, Math.round(6 / dt));
+  const isChord = (m, y) => {
+    const a = getNode(s, m.a), b = getNode(s, m.b);
+    return Math.abs(a.ry - y) < 1e-9 && Math.abs(b.ry - y) < 1e-9 && m.kind === 'beam';
+  };
+  const bottom = s.members.filter(m => isChord(m, 1.0));
+  const top = s.members.filter(m => isChord(m, 1.8));
+  checkTrue('T15a bridge has 4 bottom + 3 top chord beams', bottom.length === 4 && top.length === 3);
+  checkTrue('T15b bottom chord all in tension', bottom.every(m => memberForce(m) > 1),
+    `min=${fmt(Math.min(...bottom.map(memberForce)))} N`);
+  checkTrue('T15c top chord all in compression', top.every(m => memberForce(m) < -1),
+    `max=${fmt(Math.max(...top.map(memberForce)))} N`);
+  // symmetric structure + central load: mirror members carry equal force
+  const bl = bottom.find(m => getNode(s, m.a).rx + getNode(s, m.b).rx === 1);   // x 0-1
+  const br = bottom.find(m => getNode(s, m.a).rx + getNode(s, m.b).rx === 7);   // x 3-4
+  check('T15d mirror-image chords carry equal force', memberForce(bl) / memberForce(br), 1, 0.02);
+  const pinnedMoved = s.nodes.filter(n => n.pinned)
+    .some((n, i) => Math.abs(n.x - ends[i][0]) > 1e-12 || Math.abs(n.y - ends[i][1]) > 1e-12);
+  checkTrue('T15e abutments never move', !pinnedMoved);
+  const load = s.nodes.find(n => n.mass === 4);
+  checkTrue('T15f load stays above the ground', load.y > 0.05, `y=${fmt(load.y)}`);
 }
 
 console.log('');

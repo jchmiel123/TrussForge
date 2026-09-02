@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.0 - 2026-09-02
+
+Bridge demo. 53/53 tests.
+
+- New demo: Bridge - a 4-bay Warren truss, left end anchored, right end
+  on a rocker link (anchoring both ends made it a two-hinged arch whose
+  thrust put the end bays into compression - the tests caught it), with
+  a 4 kg load pumping on an actuator at mid-span. Loading it turns the
+  force view on: bottom chord red (tension), top chord blue
+  (compression), diagonals alternating.
+- Demos carry UI hints (`DEMO_HINTS`: status line, force view on).
+- Tests T15a-f: chord counts, bottom chord all tension / top chord all
+  compression (closed-form sign result for a simply supported truss),
+  mirror-image chords equal within 2 %, abutments immobile, load clears
+  the ground.
+
 ## 0.4.0 - 2026-09-02
 
 Force view (member strain coloring) + force readout. 47/47 tests.

@@ -19,7 +19,8 @@ python -m http.server 8341
 ```
 
 Load the "Walker" demo and press Run. "Hopper" is the same body
-driven into a bounding gait.
+driven into a bounding gait. "Bridge" is a Warren truss under a pumping
+load with the force view on.
 
 ## What you build with
 
@@ -88,7 +89,7 @@ driven into a bounding gait.
 
 ## Headless verification hooks
 
-- URL params: `?demo=walker|hopper|merry`, `&run=1` (auto-run),
+- URL params: `?demo=walker|hopper|bridge|merry`, `&run=1` (auto-run),
   `&check=N` (fast-forward N simulated seconds, publish centroid motion
   into `#checkResult` + `document.title` for `--dump-dom`),
   `&layout=1` (toolbar geometry dump).
@@ -99,6 +100,6 @@ driven into a bounding gait.
 
 ## Roadmap
 
-- More demos (bridge under load, catapult, inchworm).
+- More demos (catapult, inchworm).
 - Copy/paste of substructures; mirror.
 - Actuator group editing (select several, phase-spread them).
