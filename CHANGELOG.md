@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.0 - 2026-09-02
+
+Copy / paste / mirror of substructures, group editing. 63/63 tests.
+
+- Engine (`engine/model.js`): `componentOf` (connected body),
+  `extractSub` / `insertSub` (portable fragment with rest pose, flags,
+  mass, member rest lengths and waves verbatim), `mirrorSub` (left-right
+  about the bounding-box centre, rest + current pose), `translateSub`,
+  `fragmentBounds`. Tests T16a-j: pasted walker walks like the original
+  (within 3 % - float rounding + chaotic gait), rest lengths / waves
+  verbatim, mirrored walker walks BACKWARDS at the same speed (physics
+  is left-right symmetric), lengths preserved.
+- Web: new **Group** tool (M): drag a box to select nodes, tap to add /
+  remove, drag a grouped node to move the whole group. Group panel:
+  Copy, Paste, Mirror, Delete; when the group has muscles, shared period
+  and amplitude sliders plus "Spread phases" (evenly spaced left to
+  right - the actuator-group roadmap item).
+- "Select body" on node and member panels grabs the connected creature.
+- Clipboard persists in localStorage. Paste lands to the right of the
+  source when it is on screen, else mid-view, never below ground; the
+  pasted group is selected with the Group tool active so it can be
+  dragged into place. Toolbar Paste button.
+- Keys: Ctrl+C / Ctrl+V / Ctrl+D duplicate / Ctrl+A select all.
+
 ## 0.5.0 - 2026-09-02
 
 Bridge demo. 53/53 tests.

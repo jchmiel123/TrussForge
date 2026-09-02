@@ -40,7 +40,7 @@ load with the force view on.
 
 ## Controls
 
-- **Palette**: Select / Node / Beam / Spring / Actuator / Erase.
+- **Palette**: Select / Group / Node / Beam / Spring / Actuator / Erase.
 - Tap empty space (Node tool) to place a node. Grid snap is on by
   default; toggle it off for freeform placement.
 - Drag node-to-node (member tools) to connect; drag node-to-empty to
@@ -55,11 +55,16 @@ load with the force view on.
   gravity toggle, follow-camera toggle, **World** (gravity, friction,
   drag, sim speed - opens in the properties panel), Save/Open (JSON file)
   plus localStorage autosave. Clear and Demo are undoable.
+- **Group** tool: drag a box around nodes to group them, tap nodes to add
+  or remove, drag a grouped node to move the group. The group panel has
+  Copy / Paste / Mirror / Delete and, for muscles, shared period and
+  amplitude plus "Spread phases". "Select body" on any node or member
+  grabs the whole connected creature. Ctrl+C / Ctrl+V / Ctrl+D / Ctrl+A.
 - **Force view** (toolbar arrows, key F): members turn red in tension
   and blue in compression, brighter and thicker the more of the build's
   weight they carry. The member panel shows a live "N tension /
   compression" readout.
-- Keys: Space run, R reset, G snap, F force view, V/N/B/S/A/E tools, Esc deselect,
+- Keys: Space run, R reset, G snap, F force view, V/M/N/B/S/A/E tools, Esc deselect,
   Del delete, Ctrl+Z/Ctrl+Y undo/redo, Ctrl+S/Ctrl+O.
 
 ## Physics notes
@@ -101,5 +106,3 @@ load with the force view on.
 ## Roadmap
 
 - More demos (catapult, inchworm).
-- Copy/paste of substructures; mirror.
-- Actuator group editing (select several, phase-spread them).

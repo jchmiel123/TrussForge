@@ -6,6 +6,7 @@ import {
   createState, addNode, addMember, removeNode, removeMember,
   getNode, getMember, findMember, membersAt, rebuildBraces, reset,
   serialize, deserialize, centroid, DEFAULTS,
+  componentOf, extractSub, insertSub, mirrorSub, fragmentBounds,
 } from '../engine/model.js';
 import { step, memberForce, FIXED_DT } from '../engine/sim.js';
 import { DEMOS, DEMO_HINTS } from '../engine/demos.js';
@@ -14,7 +15,7 @@ import { DEMOS, DEMO_HINTS } from '../engine/demos.js';
 // CONFIG / VERSION
 // ============================================================
 
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.6.0';
 const BUILD_DATE = '2026-09-02';
 const GRID = 0.25;            // snap pitch, meters
 const NODE_R = 0.055;         // node draw radius, meters
@@ -22,6 +23,7 @@ const TAP_PX = 7;             // movement under this = a tap
 const HIT_NODE_PX = 16;       // node hit radius, screen px
 const HIT_MEMBER_PX = 11;     // member hit distance, screen px
 const AUTOSAVE_KEY = 'trussforge.autosave';
+const CLIP_KEY = 'trussforge.clipboard';
 const VIEW_KEY = 'trussforge.view';
 const MAX_STEPS_FRAME = 24;   // sim steps per frame cap (heavy tab safety)
 const UNDO_DEPTH = 60;
@@ -38,7 +40,7 @@ let tool = 'select';          // select | node | beam | spring | actuator | eras
 let snapOn = true;
 let follow = false;
 let strainOn = false;         // force view: color members by axial force
-let sel = { kind: null, id: 0 };       // kind: 'node' | 'member' | 'world' | null
+let sel = { kind: null, id: 0 };       // kind: 'node' | 'member' | 'group' (ids[]) | 'world' | null
 let cam = { x: 0.6, y: 0.9, zoom: 110 };   // world center + px per meter
 let toolHint = '';
 
@@ -186,7 +188,8 @@ function memberEnds(m) {
 
 function drawMember(m) {
   const [x1, y1, x2, y2, a, b] = memberEnds(m);
-  const seld = sel.kind === 'member' && sel.id === m.id;
+  const gs = groupSet();
+  const seld = (sel.kind === 'member' && sel.id === m.id) || (gs && gs.has(m.a) && gs.has(m.b));
   let w = Math.max(2.5, 0.055 * cam.zoom);
   let col = null;
   if (strainOn) {
@@ -270,7 +273,8 @@ function drawNode(n) {
   const x = sx(n.x), y = sy(n.y);
   // heavier nodes draw bigger (area ~ mass), capped so 4 kg stays tappable
   const r = Math.max(4, NODE_R * cam.zoom) * Math.min(1.6, Math.sqrt(Math.max(0.3, n.mass)));
-  const seld = sel.kind === 'node' && sel.id === n.id;
+  const gs = groupSet();
+  const seld = (sel.kind === 'node' && sel.id === n.id) || (gs && gs.has(n.id));
   if (seld) {
     ctx.fillStyle = 'rgba(47, 129, 247, .35)';
     ctx.beginPath(); ctx.arc(x, y, r + 7, 0, 7); ctx.fill();
@@ -305,7 +309,20 @@ function drawNode(n) {
 }
 
 function drawGesture() {
-  if (!gesture || gesture.type !== 'member') return;
+  if (!gesture) return;
+  if (gesture.type === 'marquee') {
+    const x = Math.min(gesture.x0, gesture.x1), y = Math.min(gesture.y0, gesture.y1);
+    const w = Math.abs(gesture.x1 - gesture.x0), h = Math.abs(gesture.y1 - gesture.y0);
+    ctx.fillStyle = 'rgba(47, 129, 247, .10)';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(88, 166, 255, .8)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+    return;
+  }
+  if (gesture.type !== 'member') return;
   const a = getNode(state, gesture.from);
   if (!a) return;
   ctx.strokeStyle = '#2f81f7';
@@ -440,7 +457,18 @@ canvas.addEventListener('pointerdown', ev => {
   if (pointers.size > 2) return;
 
   const n = hitNode(p.sx, p.sy);
-  if (tool === 'select' && n) {
+  const gs = groupSet();
+  if (tool === 'group' && n && gs && gs.has(n.id)) {
+    // drag moves the whole group; a tap removes this node from it
+    if (!running) pushUndo();
+    gesture = { type: 'dragGroup', id: n.id, ids: [...gs], moved: false };
+  } else if (tool === 'group' && n) {
+    // a tap adds this node to the group; a drag moves just this node
+    if (!running) pushUndo();
+    gesture = { type: 'dragNode', id: n.id, moved: false, addToGroup: true };
+  } else if (tool === 'group') {
+    gesture = { type: 'marquee', x0: p.sx, y0: p.sy, x1: p.sx, y1: p.sy };
+  } else if (tool === 'select' && n) {
     if (!running) pushUndo();             // a drag is about to move the build pose
     gesture = { type: 'dragNode', id: n.id, moved: false };
   } else if ((tool === 'beam' || tool === 'spring' || tool === 'actuator') && n) {
@@ -479,6 +507,22 @@ canvas.addEventListener('pointermove', ev => {
       n.x = snap(wx(nx)); n.y = snap(wy(ny));
       n.px = n.x; n.py = n.y;   // carry, do not fling
     }
+  } else if (gesture.type === 'dragGroup' && p.moved) {
+    gesture.moved = true;
+    const lead = getNode(state, gesture.id);
+    if (lead) {
+      // the grabbed node snaps; everyone else follows by the same delta,
+      // so the group's internal geometry is untouched
+      const tx = snap(wx(nx)), ty = snap(wy(ny));
+      const dx = tx - lead.x, dy = ty - lead.y;
+      for (const id of gesture.ids) {
+        const n = getNode(state, id);
+        if (!n) continue;
+        n.x += dx; n.y += dy; n.px = n.x; n.py = n.y;
+      }
+    }
+  } else if (gesture.type === 'marquee') {
+    gesture.x1 = nx; gesture.y1 = ny;
   } else if (gesture.type === 'member') {
     gesture.sx = nx; gesture.sy = ny;
   }
@@ -501,7 +545,13 @@ function endPointer(ev) {
     finishMember(g, p);
   } else if (g && g.type === 'dragNode') {
     if (g.moved) bakeNode(g.id);
+    else if (g.addToGroup) toggleInGroup(g.id);
     else tapAt(p.sx, p.sy);
+  } else if (g && g.type === 'dragGroup') {
+    if (g.moved) bakeGroup(g.ids);
+    else toggleInGroup(g.id);
+  } else if (g && g.type === 'marquee') {
+    finishMarquee(g, p);
   } else if (!p.moved) {
     tapAt(p.sx, p.sy);
   }
@@ -576,6 +626,43 @@ function finishMember(g, p) {
   markDirty();
 }
 
+// group selection helpers
+const groupSet = () => (sel.kind === 'group' ? new Set(sel.ids) : null);
+
+function finishMarquee(g, p) {
+  if (!p.moved) { select(null); return; }          // a tap on empty space
+  const x0 = Math.min(g.x0, g.x1), x1 = Math.max(g.x0, g.x1);
+  const y0 = Math.min(g.y0, g.y1), y1 = Math.max(g.y0, g.y1);
+  const ids = state.nodes.filter(n => {
+    const x = sx(n.x), y = sy(n.y);
+    return x >= x0 && x <= x1 && y >= y0 && y <= y1;
+  }).map(n => n.id);
+  if (!ids.length) { select(null); setStatus('Nothing inside the box.'); return; }
+  select('group', ids);
+}
+
+function toggleInGroup(id) {
+  const gs = groupSet() || new Set();
+  if (gs.has(id)) gs.delete(id); else gs.add(id);
+  select('group', [...gs]);
+}
+
+function bakeGroup(ids) {
+  if (!running) {
+    for (const id of ids) {
+      const n = getNode(state, id);
+      if (n) { n.rx = n.x; n.ry = n.y; }
+    }
+    rebuildBraces(state);
+  }
+  markDirty();
+}
+
+function selectBody(nodeId) {
+  select('group', componentOf(state, nodeId));
+  setTool('group');
+}
+
 function bakeNode(id) {
   const n = getNode(state, id);
   if (!n) return;
@@ -594,6 +681,7 @@ function bakeNode(id) {
 
 const TOOL_HINTS = {
   select: 'Drag a node to move it. Tap anything to see its settings.',
+  group: 'Drag a box around nodes to group them. Tap a node to add or remove it. Drag a grouped node to move the group.',
   node: 'Tap empty space to place a node.',
   beam: 'Drag from a node to another node (or to empty space) to add a rigid beam.',
   spring: 'Drag from a node to add a stretchy spring.',
@@ -616,7 +704,12 @@ document.querySelectorAll('.palItem').forEach(el =>
 // ============================================================
 
 function select(kind, id) {
-  sel = { kind: kind || null, id: id || 0 };
+  if (kind === 'group') {
+    const ids = [...new Set(id || [])].filter(i => getNode(state, i));
+    sel = ids.length ? { kind: 'group', id: 0, ids } : { kind: null, id: 0 };
+  } else {
+    sel = { kind: kind || null, id: id || 0 };
+  }
   renderProps();
   if (!running) draw();        // draw() positions the pill too
   else positionPill();
@@ -686,7 +779,63 @@ $('pillMass').addEventListener('click', cycleMass);
 $('pillDel').addEventListener('click', deleteSelectedNode);
 
 // ============================================================
-// PROPERTIES PANEL  (node / member / world / legend)
+// CLIPBOARD  (copy / paste / duplicate of substructures)
+// ============================================================
+
+let clip = null;    // fragment from extractSub + where it came from
+try { clip = JSON.parse(localStorage.getItem(CLIP_KEY)); } catch (e) { clip = null; }
+
+function idsToCopy() {
+  if (sel.kind === 'group') return sel.ids;
+  if (sel.kind === 'node') return componentOf(state, sel.id);
+  if (sel.kind === 'member') { const m = selectedMember(); return m ? componentOf(state, m.a) : []; }
+  return [];
+}
+
+function copySelection() {
+  const ids = idsToCopy();
+  if (!ids.length) { setStatus('Nothing to copy: group some nodes first (Group tool).'); return false; }
+  const frag = extractSub(state, ids);
+  const b = fragmentBounds(frag);
+  clip = { frag, src: { cx: b.cx, cy: b.cy } };
+  try { localStorage.setItem(CLIP_KEY, JSON.stringify(clip)); } catch (e) { /* ignore */ }
+  syncPasteButton();
+  setStatus(`Copied ${frag.nodes.length} nodes, ${frag.members.length} members.`);
+  return true;
+}
+
+// Paste to the right of where it was copied if that spot is on screen,
+// otherwise into the middle of the view. Never below the ground.
+function pasteClipboard() {
+  if (!clip || !clip.frag || !clip.frag.nodes.length) { setStatus('Clipboard is empty.'); return; }
+  const b = fragmentBounds(clip.frag);
+  const srcOnScreen = clip.src && (vw < 50 ||
+    (sx(clip.src.cx) > 0 && sx(clip.src.cx) < vw && sy(clip.src.cy) > 0 && sy(clip.src.cy) < vh));
+  let tx, ty;
+  if (srcOnScreen) { tx = clip.src.cx + b.w + 0.5; ty = clip.src.cy; }
+  else { tx = wx(vw / 2); ty = wy(vh / 2); }
+  let dx = tx - b.cx, dy = ty - b.cy;
+  if (b.y0 + dy < 0) dy = -b.y0;            // keep it above ground
+  if (snapOn) { dx = snap(dx); dy = snap(dy); }
+  pushUndo();
+  const ids = insertSub(state, clip.frag, dx, dy);
+  if (running) rebuildBraces(state, true);
+  clip.src = { cx: b.cx + dx, cy: b.cy + dy };   // a second paste lands further right
+  markDirty();
+  setTool('group');
+  select('group', ids);
+  setStatus('Pasted. Drag a grouped node to move it into place.');
+}
+
+function duplicateSelection() { if (copySelection()) pasteClipboard(); }
+
+function syncPasteButton() {
+  $('pasteBtn').disabled = !(clip && clip.frag && clip.frag.nodes.length);
+}
+$('pasteBtn').addEventListener('click', pasteClipboard);
+
+// ============================================================
+// PROPERTIES PANEL  (node / member / group / world / legend)
 // ============================================================
 
 const propsEl = $('props');
@@ -712,9 +861,11 @@ const LEGEND_HTML = `
   <p><span class="sw" style="background:#e3b341"></span><b>Actuator</b> - a muscle. Its length follows a wave. Give muscles different phases to make a gait.</p>
   <p><b>Anchor</b> - fixes a node to the world.</p>
   <p><b>Weld</b> - members meeting at a node keep their angles (rigid joint).</p>
+  <p><b>Group</b> tool: box-select nodes, then copy / paste / mirror / move them. "Select body" on a node or member grabs the whole creature.</p>
   <p><b>Force view</b> (<kbd>F</kbd>) colors members: <span style="color:#ff5648">red = tension</span>, <span style="color:#40a0ff">blue = compression</span>. Full color = carrying the whole build's weight.</p>
   <p class="keys"><kbd>Space</kbd> run <kbd>R</kbd> reset <kbd>G</kbd> snap <kbd>Ctrl+Z</kbd> undo<br>
-  <kbd>V</kbd> <kbd>N</kbd> <kbd>B</kbd> <kbd>S</kbd> <kbd>A</kbd> <kbd>E</kbd> tools <kbd>Del</kbd> delete</p>
+  <kbd>V</kbd> <kbd>M</kbd> <kbd>N</kbd> <kbd>B</kbd> <kbd>S</kbd> <kbd>A</kbd> <kbd>E</kbd> tools <kbd>Del</kbd> delete<br>
+  <kbd>Ctrl+C</kbd> copy <kbd>Ctrl+V</kbd> paste <kbd>Ctrl+D</kbd> duplicate <kbd>Ctrl+A</kbd> all</p>
 </div>`;
 
 const MEMBER_DESC = {
@@ -737,6 +888,11 @@ const TIPS = {
   anchor: 'Anchor: fixed to the world, never moves. Good for hanging things and pivots.',
   weld: 'Weld: members meeting here keep their angles. Needs 2+ members to do anything.',
   gravity: 'Downward pull in m/s^2. Earth is 9.8. 0 = floaty.',
+  body: 'Select every node connected to this one (the whole creature) as a group.',
+  copy: 'Copy the group to the clipboard (Ctrl+C). Survives reloads.',
+  paste: 'Paste a copy next to the original, or mid-view (Ctrl+V). Ctrl+D duplicates in one go.',
+  mirror: 'Flip the group left-right about its centre. A mirrored walker walks the other way.',
+  spread: 'Give the muscles evenly spaced phases from left to right - the quickest way to a gait.',
   force: 'Axial force through this member right now. Tension pulls its ends together, compression pushes them apart. Toggle the force view (F) to see the whole build.',
   friction: 'Friction coefficient. 0 = ice, 0.7 = rubber, 2 = glue. A foot only grips as hard as it is pressed down, so a lifting foot slides free.',
   drag: 'Air resistance. Higher = everything settles faster.',
@@ -748,6 +904,7 @@ function renderProps() {
   const n = selectedNode(), m = selectedMember();
   if (sel.kind === 'world') { renderWorldProps(); openSheet(true); return; }
   if (n) { renderNodeProps(n); openSheet(!narrow.matches); return; }   // phone: the pill is enough
+  if (sel.kind === 'group') { renderGroupProps(); openSheet(true); return; }
   if (m) { renderMemberProps(m); openSheet(true); return; }
   propsBody.innerHTML = LEGEND_HTML;
   openSheet(false);
@@ -764,9 +921,10 @@ function renderNodeProps(n) {
       <button id="npWeld" class="${n.locked ? 'active' : ''}" data-tip="${TIPS.weld}" title="${TIPS.weld}">Weld</button>
     </div>
     ${propSlider('mass', 'mass', 0.2, 5, 0.1, n.mass, 'kg')}
-    <div class="propBtns"><button id="npDel" class="danger">Delete node</button></div>`;
+    <div class="propBtns"><button id="npBody" data-tip="${TIPS.body}" title="${TIPS.body}">Select body</button><button id="npDel" class="danger">Delete node</button></div>`;
   $('npAnchor').addEventListener('click', toggleAnchor);
   $('npWeld').addEventListener('click', toggleWeld);
+  $('npBody').addEventListener('click', () => selectBody(n.id));
   $('npDel').addEventListener('click', deleteSelectedNode);
   wireProp('mass', v => { n.mass = v; });
 }
@@ -794,8 +952,9 @@ function renderMemberProps(m) {
     }
   }
   rows.push(`<div class="propRow readout" data-tip="${TIPS.force}" title="${TIPS.force}"><label>force <span class="pv" id="pv_force">${fmtForce(memberForce(m))}</span></label></div>`);
-  rows.push('<div class="propBtns"><button id="mDel" class="danger">Delete</button></div>');
+  rows.push(`<div class="propBtns"><button id="mBody" data-tip="${TIPS.body}" title="${TIPS.body}">Select body</button><button id="mDel" class="danger">Delete</button></div>`);
   propsBody.innerHTML = rows.join('');
+  $('mBody').addEventListener('click', () => selectBody(m.a));
 
   wireProp('restLen', v => { m.restLen = v; rebuildBraces(state, running); });
   if (m.kind === 'spring') {
@@ -815,6 +974,55 @@ function renderMemberProps(m) {
     removeMember(state, m.id);
     select(null); markDirty();
   });
+}
+
+function renderGroupProps() {
+  const gs = groupSet();
+  const ids = sel.ids;
+  const mems = state.members.filter(m => gs.has(m.a) && gs.has(m.b));
+  const acts = mems.filter(m => m.kind === 'actuator');
+  const rows = [];
+  rows.push(`<div class="propTitle">Group</div>`);
+  rows.push(`<p class="desc">${ids.length} node${ids.length === 1 ? '' : 's'}, ${mems.length} member${mems.length === 1 ? '' : 's'}${acts.length ? `, ${acts.length} muscle${acts.length === 1 ? '' : 's'}` : ''}. Drag a grouped node to move them all.</p>`);
+  rows.push(`<div class="propBtns"><button id="gCopy" data-tip="${TIPS.copy}" title="${TIPS.copy}">Copy</button><button id="gPaste" data-tip="${TIPS.paste}" title="${TIPS.paste}">Paste</button></div>`);
+  rows.push(`<div class="propBtns"><button id="gMirror" data-tip="${TIPS.mirror}" title="${TIPS.mirror}">Mirror</button><button id="gDel" class="danger">Delete</button></div>`);
+  if (acts.length) {
+    rows.push(`<div class="propTitle" style="margin-top:10px">Muscles in group</div>`);
+    rows.push(propSlider('gperiod', 'period (all)', 0.2, 4, 0.05, acts[0].wave.period, 's'));
+    rows.push(propSlider('gamp', 'amplitude (all)', 0, 0.45, 0.01, acts[0].wave.amp, '+/-'));
+    rows.push(`<div class="propBtns"><button id="gSpread" data-tip="${TIPS.spread}" title="${TIPS.spread}">Spread phases</button></div>`);
+  }
+  propsBody.innerHTML = rows.join('');
+  $('gCopy').addEventListener('click', copySelection);
+  $('gPaste').addEventListener('click', pasteClipboard);
+  $('gPaste').disabled = !(clip && clip.frag);
+  $('gMirror').addEventListener('click', () => {
+    pushUndo();
+    mirrorSub(state, ids);
+    if (running) rebuildBraces(state, true);
+    markDirty(); setStatus('Mirrored left-right.');
+    if (!running) draw();
+  });
+  $('gDel').addEventListener('click', deleteGroup);
+  if (acts.length) {
+    wireProp('gperiod', v => { for (const m of acts) m.wave.period = v; });
+    wireProp('gamp', v => { for (const m of acts) m.wave.amp = v; });
+    $('gSpread').addEventListener('click', () => {
+      pushUndo();
+      const mid = m => { const a = getNode(state, m.a), b = getNode(state, m.b); return (a.rx + b.rx) / 2; };
+      const sorted = [...acts].sort((p, q) => mid(p) - mid(q));
+      sorted.forEach((m, i) => { m.wave.phase = +(i / sorted.length).toFixed(3); });
+      markDirty();
+      setStatus(`Phases spread 0 .. ${((sorted.length - 1) / sorted.length).toFixed(2)} left to right.`);
+    });
+  }
+}
+
+function deleteGroup() {
+  if (sel.kind !== 'group') return;
+  pushUndo();
+  for (const id of sel.ids) removeNode(state, id);
+  select(null); markDirty();
 }
 
 function renderWorldProps() {
@@ -955,12 +1163,17 @@ window.addEventListener('keydown', ev => {
   else if (mod && k === 'y') { ev.preventDefault(); redo(); }
   else if (mod && k === 's') { ev.preventDefault(); saveFile(); }
   else if (mod && k === 'o') { ev.preventDefault(); $('openFile').click(); }
+  else if (mod && k === 'c') { ev.preventDefault(); copySelection(); }
+  else if (mod && k === 'v') { ev.preventDefault(); pasteClipboard(); }
+  else if (mod && k === 'd') { ev.preventDefault(); duplicateSelection(); }
+  else if (mod && k === 'a') { ev.preventDefault(); select('group', state.nodes.map(n => n.id)); setTool('group'); }
   else if (mod) return;
   else if (k === ' ') { ev.preventDefault(); setRunning(!running); }
   else if (k === 'r') $('resetBtn').click();
   else if (k === 'g') $('snapBtn').click();
   else if (k === 'f') $('strainBtn').click();
   else if (k === 'v') setTool('select');
+  else if (k === 'm') setTool('group');
   else if (k === 'n') setTool('node');
   else if (k === 'b') setTool('beam');
   else if (k === 's') setTool('spring');
@@ -969,6 +1182,7 @@ window.addEventListener('keydown', ev => {
   else if (k === 'escape') select(null);
   else if (k === 'delete' || k === 'backspace') {
     if (selectedNode()) deleteSelectedNode();
+    else if (sel.kind === 'group') deleteGroup();
     else if (selectedMember()) { pushUndo(); removeMember(state, sel.id); select(null); markDirty(); }
   }
 });
@@ -1166,6 +1380,9 @@ window.TF = {
   set state(s) { state = s; },
   step: (n = 1) => { for (let i = 0; i < n; i++) step(state, FIXED_DT); updateForceReadout(); draw(); },
   memberForce,
+  copy: copySelection, paste: pasteClipboard, duplicate: duplicateSelection,
+  selectBody,
+  get clip() { return clip; },
   get strain() { return strainOn; },
   set strain(v) { if (!!v !== strainOn) $('strainBtn').click(); },
   loadDemo,
@@ -1196,4 +1413,5 @@ resize();
 handleParams();
 syncToolbar();
 syncUndoButtons();
+syncPasteButton();
 requestAnimationFrame(frame);

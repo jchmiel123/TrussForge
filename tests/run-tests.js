@@ -5,6 +5,7 @@
 import {
   createState, addNode, addMember, reset, serialize, deserialize,
   getNode, centroid, rebuildBraces,
+  componentOf, extractSub, insertSub, mirrorSub, translateSub, fragmentBounds,
 } from '../engine/model.js';
 import { step, run, waveValue, targetLength, memberForce, FIXED_DT } from '../engine/sim.js';
 import { walker, hopper, bridge, merry } from '../engine/demos.js';
@@ -391,6 +392,51 @@ function measurePeriod(state, signal, seconds) {
   checkTrue('T15e abutments never move', !pinnedMoved);
   const load = s.nodes.find(n => n.mass === 4);
   checkTrue('T15f load stays above the ground', load.y > 0.05, `y=${fmt(load.y)}`);
+}
+
+// ---- T16: substructure copy / paste / mirror ------------------------------
+{
+  // a) connected component of the walker is all 4 nodes; a stray node is not
+  const s = walker();
+  const stray = addNode(s, 5, 1);
+  const comp = componentOf(s, s.nodes[0].id);
+  checkTrue('T16a component of walker = its 4 nodes', comp.length === 4 && !comp.includes(stray.id));
+  // b) extract + insert: the copy walks exactly like the original
+  //    (translation invariance - identical dx after 20 s)
+  const frag = extractSub(s, comp);
+  checkTrue('T16b fragment has 4 nodes + 5 members', frag.nodes.length === 4 && frag.members.length === 5);
+  const s2 = walker();
+  const newIds = insertSub(s2, extractSub(s2, componentOf(s2, s2.nodes[0].id)), 3, 0);
+  checkTrue('T16c paste creates 4 new nodes', newIds.length === 4 && s2.nodes.length === 8);
+  const orig = new Set(s2.nodes.slice(0, 4).map(n => n.id)), copy = new Set(newIds);
+  const cx = (st, set) => { let x = 0, k = 0; for (const n of st.nodes) if (set.has(n.id)) { x += n.x; k++; } return x / k; };
+  const o0 = cx(s2, orig), c0 = cx(s2, copy);
+  run(s2, Math.round(20 / dt));
+  // (a 3 m offset changes float rounding; the gait is chaotic, so allow 3 %)
+  const dOrig = cx(s2, orig) - o0;
+  check('T16d pasted walker walks like the original', (cx(s2, copy) - c0) / dOrig, 1, 0.03);
+  check('T16e paste offset preserved', c0 - o0, 3, 1e-9);
+  // c) pasted member rest lengths and waves copied verbatim
+  const m0 = s2.members[0], mc = s2.members.find(m => copy.has(m.a) && copy.has(m.b) && m.kind === 'actuator' && m.wave.phase === m0.wave.phase);
+  check('T16f pasted actuator rest length verbatim', mc.restLen, m0.restLen, 1e-12);
+  check('T16g pasted actuator amp verbatim', mc.wave.amp, m0.wave.amp, 1e-12);
+  // d) mirror: physics is left-right symmetric, so a mirrored walker walks
+  //    backwards at the same speed (constraint ordering makes it inexact)
+  const w1 = walker(), w2 = walker();
+  mirrorSub(w2, w2.nodes.map(n => n.id));
+  const a0 = centroid(w1).x, b0 = centroid(w2).x;
+  run(w1, Math.round(20 / dt)); run(w2, Math.round(20 / dt));
+  const d1 = centroid(w1).x - a0, d2 = centroid(w2).x - b0;
+  check('T16h mirrored walker walks backwards at the same speed', d2 / d1, -1, 0.05);
+  // e) mirror preserves member lengths; translate preserves everything
+  const w3 = walker();
+  const lens = w3.members.map(m => { const a = getNode(w3, m.a), b = getNode(w3, m.b); return Math.hypot(b.rx - a.rx, b.ry - a.ry); });
+  mirrorSub(w3, w3.nodes.map(n => n.id), 1.0);
+  translateSub(w3, w3.nodes.map(n => n.id), 2, 1);
+  const lens2 = w3.members.map(m => { const a = getNode(w3, m.a), b = getNode(w3, m.b); return Math.hypot(b.rx - a.rx, b.ry - a.ry); });
+  check('T16i mirror + translate keep member lengths', Math.max(...lens.map((l, i) => Math.abs(l - lens2[i]))), 0, 1e-12);
+  const fb = fragmentBounds(extractSub(w3, w3.nodes.map(n => n.id)));
+  check('T16j translated bounds min y', fb.y0, 1, 1e-12);
 }
 
 console.log('');

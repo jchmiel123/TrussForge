@@ -172,6 +172,104 @@ export function centroid(state) {
   return k ? { x: x / k, y: y / k } : { x: 0, y: 0 };
 }
 
+// ---- substructures (copy / paste / mirror) -------------------------------
+
+// Node ids reachable from nodeId through members (the connected "body").
+export function componentOf(state, nodeId) {
+  const seen = new Set([nodeId]);
+  const stack = [nodeId];
+  while (stack.length) {
+    const id = stack.pop();
+    for (const m of state.members) {
+      const other = m.a === id ? m.b : m.b === id ? m.a : null;
+      if (other !== null && !seen.has(other)) { seen.add(other); stack.push(other); }
+    }
+  }
+  return [...seen];
+}
+
+// A portable fragment: the given nodes (rest pose, flags, mass) and every
+// member whose BOTH ends are in the set. Ids are local to the fragment.
+export function extractSub(state, ids) {
+  const set = new Set(ids);
+  const nodes = state.nodes.filter(n => set.has(n.id)).map(n => ({
+    id: n.id, x: n.rx, y: n.ry,
+    pinned: n.pinned || undefined, locked: n.locked || undefined,
+    mass: n.mass !== DEFAULTS.nodeMass ? n.mass : undefined,
+  }));
+  const members = state.members.filter(m => set.has(m.a) && set.has(m.b)).map(m => ({
+    a: m.a, b: m.b, kind: m.kind, restLen: m.restLen,
+    k: m.kind === 'spring' ? m.k : undefined,
+    c: m.kind === 'spring' ? m.c : undefined,
+    wave: m.kind === 'actuator' ? { ...m.wave } : undefined,
+  }));
+  return { app: 'trussforge-fragment', version: 1, nodes, members };
+}
+
+export function fragmentBounds(frag) {
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const n of frag.nodes) {
+    x0 = Math.min(x0, n.x); x1 = Math.max(x1, n.x);
+    y0 = Math.min(y0, n.y); y1 = Math.max(y1, n.y);
+  }
+  return { x0, x1, y0, y1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
+}
+
+// Insert a fragment translated by (dx, dy). Nodes are born at rest in
+// their new place (build pose = current pose). Member rest lengths are
+// copied verbatim so pre-stressed members paste exactly. Returns the new
+// node ids (same order as frag.nodes).
+export function insertSub(state, frag, dx = 0, dy = 0) {
+  const map = new Map();
+  const ids = [];
+  for (const d of frag.nodes) {
+    const n = addNode(state, d.x + dx, d.y + dy, {
+      pinned: !!d.pinned, locked: !!d.locked, mass: d.mass || DEFAULTS.nodeMass,
+    });
+    map.set(d.id, n.id);
+    ids.push(n.id);
+  }
+  for (const d of frag.members) {
+    addMember(state, map.get(d.a), map.get(d.b), d.kind, {
+      restLen: d.restLen, k: d.k, c: d.c, wave: d.wave,
+    });
+  }
+  rebuildBraces(state);
+  return ids;
+}
+
+// Mirror the given nodes left-right about the vertical line x = axisX
+// (default: the centre of their bounding box). Rest AND current pose,
+// so it is safe while paused or running. Lengths are preserved.
+export function mirrorSub(state, ids, axisX) {
+  const set = new Set(ids);
+  const ns = state.nodes.filter(n => set.has(n.id));
+  if (!ns.length) return;
+  if (axisX === undefined) {
+    let x0 = Infinity, x1 = -Infinity;
+    for (const n of ns) { x0 = Math.min(x0, n.rx); x1 = Math.max(x1, n.rx); }
+    axisX = (x0 + x1) / 2;
+  }
+  for (const n of ns) {
+    n.rx = 2 * axisX - n.rx;
+    n.x = 2 * axisX - n.x;
+    n.px = 2 * axisX - n.px;
+  }
+  rebuildBraces(state);
+}
+
+// Translate the given nodes (rest and current pose) by (dx, dy).
+export function translateSub(state, ids, dx, dy) {
+  const set = new Set(ids);
+  for (const n of state.nodes) {
+    if (!set.has(n.id)) continue;
+    n.rx += dx; n.ry += dy;
+    n.x += dx; n.y += dy;
+    n.px += dx; n.py += dy;
+  }
+  rebuildBraces(state);
+}
+
 // ---- serialization -------------------------------------------------------
 
 export function serialize(state) {

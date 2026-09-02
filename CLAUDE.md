@@ -30,6 +30,9 @@ Everything in-house and dependency-free.
   (`rebuildBraces`; pass `fromCurrent=true` when toggling mid-run so the
   weld grabs the deformed pose instead of jolting). Member rest length
   is taken from CURRENT positions on creation (safe mid-run adds).
+  Substructures: `componentOf`, `extractSub` / `insertSub` (fragment =
+  rest pose + verbatim members), `mirrorSub`, `translateSub` - all
+  headless, tested in T16 (mirrored walker walks backwards).
 - `engine/sim.js` - `step(state, dt)` at FIXED_DT = 1/240:
   spring forces (soft, force-based - that is what makes the SHM
   frequency test exact) -> verlet integrate with gravity/drag ->
@@ -73,6 +76,12 @@ Everything in-house and dependency-free.
     synthetic PointerEvents get wrong offsetX inside the preview pane.
   - `fitView` before the board has a size sets `pendingFit`; `resize`
     retries. The preview pane opens tabs at 0x0 first.
+  - Group selection: `sel = {kind:'group', ids:[...]}`; `groupSet()`
+    helper; Group tool gestures `marquee` / `dragGroup` (lead node
+    snaps, others follow by the same delta) / `dragNode` with
+    `addToGroup` (tap toggles membership). Clipboard `clip` = {frag,
+    src} in localStorage; `pasteClipboard` picks the spot (right of the
+    source if on screen, else mid-view, never below ground).
   - Force view (`strainOn`, key F): `strainStyle(f)` maps f / fRef to
     gray->red / gray->blue; fRef = total unpinned mass * g (floor 5 N),
     recomputed per draw. Member panel `#pv_force` is refreshed by
