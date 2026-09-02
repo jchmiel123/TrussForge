@@ -9,6 +9,7 @@ import {
 } from '../engine/model.js';
 import { step, run, waveValue, targetLength, memberForce, FIXED_DT } from '../engine/sim.js';
 import { walker, hopper, bridge, merry } from '../engine/demos.js';
+import { snapToLattice, forEachLatticePoint, rowHeight } from '../engine/lattice.js';
 
 let pass = 0, fail = 0;
 function check(name, got, want, tol) {
@@ -437,6 +438,32 @@ function measurePeriod(state, signal, seconds) {
   check('T16i mirror + translate keep member lengths', Math.max(...lens.map((l, i) => Math.abs(l - lens2[i]))), 0, 1e-12);
   const fb = fragmentBounds(extractSub(w3, w3.nodes.map(n => n.id)));
   check('T16j translated bounds min y', fb.y0, 1, 1e-12);
+}
+
+// ---- T17: snap lattices (pure geometry) ---------------------------------
+{
+  const sq = snapToLattice('square', 0.25, 0.6, 0.2);
+  check('T17a square snap x', sq.x, 0.5, 1e-12);
+  check('T17b square snap y', sq.y, 0.25, 1e-12);
+  // tri, side 1: (0.6, 0.2) is nearer (1, 0) [d=0.45] than (0.5, 0.866) [d=0.67]
+  const t1 = snapToLattice('tri', 1, 0.6, 0.2);
+  check('T17c tri snap picks row 0 point', Math.hypot(t1.x - 1, t1.y - 0), 0, 1e-12);
+  // (0.5, 0.5) is nearer the odd-row point (0.5, 0.866) [d=0.37] than (0,0)/(1,0) [d=0.71]
+  const t2 = snapToLattice('tri', 1, 0.5, 0.5);
+  check('T17d tri snap picks shifted odd row', Math.hypot(t2.x - 0.5, t2.y - Math.sqrt(3) / 2), 0, 1e-12);
+  // every tri lattice point has neighbours at exactly one pitch: an
+  // equilateral triangle (0,0), (1,0), (0.5, h) snaps to itself
+  const h = rowHeight('tri', 1);
+  const tri = [[0, 0], [1, 0], [0.5, h]].map(([x, y]) => snapToLattice('tri', 1, x + 1e-9, y - 1e-9));
+  const side = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  check('T17e tri lattice triangle is equilateral', Math.max(
+    Math.abs(side(tri[0], tri[1]) - 1), Math.abs(side(tri[1], tri[2]) - 1), Math.abs(side(tri[0], tri[2]) - 1)), 0, 1e-9);
+  // point count in a box: square 0.5 pitch over [0,1]x[0,1] = 3x3 = 9
+  let n = 0; forEachLatticePoint('square', 0.5, 0, 0, 1, 1, () => n++);
+  check('T17f square points in unit box', n, 9, 0);
+  // negative rows keep the odd-row shift (j & 1 works for negatives)
+  const t3 = snapToLattice('tri', 1, 0.5, -h);
+  check('T17g tri snap below ground keeps row shift', t3.x, 0.5, 1e-12);
 }
 
 console.log('');

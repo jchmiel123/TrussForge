@@ -59,6 +59,8 @@ Everything in-house and dependency-free.
   bounding. Gaits are chaotic-sensitive - re-run a sweep (score = WORST
   dx across mu 0.3..2.0, constrain airborne fraction for a crawl) before
   touching the engine's contact code or the gait numbers.
+- `engine/lattice.js` - snap lattices (square, equilateral tri), pure
+  geometry, T17.
 - `tests/run-tests.js` - `node tests/run-tests.js`, exit 0 = pass.
 - `web/app.js` - board UI, organized with section banners. World y is UP
   in the engine; the renderer flips. `window.TF` console hooks (incl.
@@ -124,5 +126,7 @@ Everything in-house and dependency-free.
 
 - Engine units: meters, kilograms, seconds; gravity default 9.81;
   ground surface at y = 0.
-- Grid snap pitch 0.25 m (`GRID` in app.js).
+- Grid = `engine/lattice.js` (square / tri, PITCHES set); UI prefs in
+  localStorage `trussforge.prefs` (NOT the build file). All snapping
+  goes through `snapPt(x, y)` in app.js - never per-axis rounding.
 - Undo/redo shipped in 0.2.0 (snapshot based, depth 60).

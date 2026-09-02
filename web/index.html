@@ -9,7 +9,7 @@
 <body>
 <div id="app">
   <header id="toolbar">
-    <div class="brand">Truss<span>Forge</span><em id="ver">v0.6.0</em></div>
+    <div class="brand">Truss<span>Forge</span><em id="ver">v0.7.0</em></div>
     <div class="group">
       <button id="runBtn" class="accent" title="Run / pause the simulation (Space)">Run</button>
       <button id="resetBtn" title="Put everything back in the build pose (R)">Reset</button>
@@ -26,7 +26,7 @@
       </button>
     </div>
     <div class="group">
-      <button id="snapBtn" class="icon active" title="Grid snap on/off (G)" aria-label="Grid snap">
+      <button id="snapBtn" class="icon active" title="Grid snap on/off (G). Grid type, pitch and brightness: Grid button" aria-label="Grid snap">
         <svg viewBox="0 0 16 16" width="16" height="16"><g fill="currentColor"><circle cx="3" cy="3" r="1.3"/><circle cx="8" cy="3" r="1.3"/><circle cx="13" cy="3" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="13" cy="8" r="1.3"/><circle cx="3" cy="13" r="1.3"/><circle cx="8" cy="13" r="1.3"/><circle cx="13" cy="13" r="1.3"/></g></svg>
       </button>
       <button id="gravBtn" class="icon active" title="Gravity on/off" aria-label="Gravity">
@@ -38,7 +38,8 @@
       <button id="strainBtn" class="icon" title="Force view: red = tension, blue = compression (F)" aria-label="Force view">
         <svg viewBox="0 0 16 16" width="16" height="16"><path d="M3.5 8 H12.5 M3.5 8 L6 5.5 M3.5 8 L6 10.5 M12.5 8 L10 5.5 M12.5 8 L10 10.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <button id="worldBtn" title="World settings: gravity, friction, drag, sim speed">World</button>
+      <button id="worldBtn" title="World settings: gravity, friction, drag, sim speed (saved with the build)">World</button>
+      <button id="gridBtn" title="Grid: lattice type, pitch, brightness (this device, not saved with the build)">Grid</button>
     </div>
     <div class="group right">
       <button id="saveBtn" title="Save the build to a JSON file (Ctrl+S)">Save</button>

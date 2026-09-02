@@ -42,7 +42,10 @@ load with the force view on.
 
 - **Palette**: Select / Group / Node / Beam / Spring / Actuator / Erase.
 - Tap empty space (Node tool) to place a node. Grid snap is on by
-  default; toggle it off for freeform placement.
+  default; toggle it off for freeform placement. **Grid** button: square
+  or equilateral-triangle lattice, pitch (0.05-1 m), dots or lines,
+  brightness. Grid settings live on the device, not in the build file,
+  so you can open any save and change the lattice to suit it.
 - Drag node-to-node (member tools) to connect; drag node-to-empty to
   create the far node and the member in one gesture.
 - Tap a node: pill with Anchor / Weld / mass / Del. Tap a member: the
@@ -64,7 +67,7 @@ load with the force view on.
   and blue in compression, brighter and thicker the more of the build's
   weight they carry. The member panel shows a live "N tension /
   compression" readout.
-- Keys: Space run, R reset, G snap, F force view, V/M/N/B/S/A/E tools, Esc deselect,
+- Keys: Space run, R reset, G snap, [ ] grid pitch, F force view, V/M/N/B/S/A/E tools, Esc deselect,
   Del delete, Ctrl+Z/Ctrl+Y undo/redo, Ctrl+S/Ctrl+O.
 
 ## Physics notes

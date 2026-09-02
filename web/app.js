@@ -10,14 +10,15 @@ import {
 } from '../engine/model.js';
 import { step, memberForce, FIXED_DT } from '../engine/sim.js';
 import { DEMOS, DEMO_HINTS } from '../engine/demos.js';
+import { snapToLattice, forEachLatticePoint, rowHeight, rowOffset, PITCHES } from '../engine/lattice.js';
 
 // ============================================================
 // CONFIG / VERSION
 // ============================================================
 
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.7.0';
 const BUILD_DATE = '2026-09-02';
-const GRID = 0.25;            // snap pitch, meters
+const PREFS_KEY = 'trussforge.prefs';
 const NODE_R = 0.055;         // node draw radius, meters
 const TAP_PX = 7;             // movement under this = a tap
 const HIT_NODE_PX = 16;       // node hit radius, screen px
@@ -40,6 +41,16 @@ let tool = 'select';          // select | node | beam | spring | actuator | eras
 let snapOn = true;
 let follow = false;
 let strainOn = false;         // force view: color members by axial force
+
+// Grid / view preferences: per device (localStorage), NOT part of the
+// build file - open any save and change the lattice to suit it.
+const PREF_DEFAULTS = { gridType: 'square', pitch: 0.25, gridStyle: 'dots', gridBright: 0.5, gridSize: 2 };
+let prefs = { ...PREF_DEFAULTS };
+try { prefs = { ...PREF_DEFAULTS, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; } catch (e) { /* defaults */ }
+if (!PITCHES.includes(prefs.pitch)) prefs.pitch = PREF_DEFAULTS.pitch;
+function savePrefs() {
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) { /* ignore */ }
+}
 let sel = { kind: null, id: 0 };       // kind: 'node' | 'member' | 'group' (ids[]) | 'world' | null
 let cam = { x: 0.6, y: 0.9, zoom: 110 };   // world center + px per meter
 let toolHint = '';
@@ -73,7 +84,14 @@ const sy = wy => vh / 2 - (wy - cam.y) * cam.zoom;
 const wx = px => (px - vw / 2) / cam.zoom + cam.x;
 const wy = py => cam.y - (py - vh / 2) / cam.zoom;
 
-function snap(v) { return snapOn ? Math.round(v / GRID) * GRID : v; }
+// Joint (x, y) snap: a triangular lattice cannot be snapped one axis at
+// a time. Every placement / drag path goes through snapPt.
+function snapPt(x, y) {
+  return snapOn ? snapToLattice(prefs.gridType, prefs.pitch, x, y) : { x, y };
+}
+// Translations (paste offsets) snap the same way: lattice vectors form
+// the lattice, so snapping the offset keeps pasted nodes on-grid.
+const snapVec = snapPt;
 
 function fitView() {
   // a hidden / not-yet-laid-out board has no size: fit again on resize
@@ -150,16 +168,55 @@ function draw() {
 }
 
 function drawGrid() {
-  const pitch = GRID * cam.zoom;
-  if (pitch < 9 || !snapOn) return;
-  ctx.fillStyle = '#1c2836';
-  const gx0 = Math.floor(wx(0) / GRID) * GRID;
-  const gy0 = Math.ceil(wy(vh) / GRID) * GRID;
-  for (let gx = gx0; sx(gx) < vw + pitch; gx += GRID) {
-    for (let gy = gy0; sy(gy) > -pitch; gy += GRID) {
-      ctx.fillRect(sx(gx) - 1, sy(gy) - 1, 2, 2);
+  if (!snapOn) return;
+  const type = prefs.gridType, p = prefs.pitch;
+  const px = p * cam.zoom;                  // pitch on screen
+  if (px < 7) return;                       // too dense to mean anything
+  const alpha = 0.1 + 0.8 * prefs.gridBright;
+  const fade = Math.min(1, (px - 7) / 12);  // ease in as you zoom in
+  const col = `rgba(125, 155, 195, ${(alpha * fade).toFixed(3)})`;
+  const s = prefs.gridSize;
+  const x0 = wx(-px), x1 = wx(vw + px), y0 = wy(vh + px), y1 = wy(-px);
+  if (prefs.gridStyle === 'lines') {
+    ctx.strokeStyle = col;
+    ctx.lineWidth = Math.max(0.5, s * 0.5);
+    ctx.beginPath();
+    if (type === 'tri') {
+      // three line families through the lattice: horizontal rows plus
+      // the two 60-degree diagonals (each drawn as one long line per
+      // row so the path stays small)
+      const h = rowHeight(type, p);
+      const jA = Math.floor(y0 / h) - 1, jB = Math.ceil(y1 / h) + 1;
+      for (let j = jA; j <= jB; j++) {
+        const y = j * h;
+        ctx.moveTo(0, sy(y)); ctx.lineTo(vw, sy(y));
+      }
+      // diagonals: lines x = c +- y / sqrt3 ... walk along row 0 and
+      // extend up/down across the whole view
+      const span = (y1 - y0) / Math.sqrt(3) + p;
+      const iA = Math.floor((x0 - span) / p), iB = Math.ceil((x1 + span) / p);
+      for (let i = iA; i <= iB; i++) {
+        const cx0 = i * p;
+        // direction (0.5, s3/2): x = cx0 + t*0.5, y = t*s3/2 -> at y, x = cx0 + y/sqrt3
+        ctx.moveTo(sx(cx0 + y0 / Math.sqrt(3)), sy(y0)); ctx.lineTo(sx(cx0 + y1 / Math.sqrt(3)), sy(y1));
+        ctx.moveTo(sx(cx0 - y0 / Math.sqrt(3)), sy(y0)); ctx.lineTo(sx(cx0 - y1 / Math.sqrt(3)), sy(y1));
+      }
+    } else {
+      for (let i = Math.floor(x0 / p); i <= Math.ceil(x1 / p); i++) {
+        ctx.moveTo(sx(i * p), 0); ctx.lineTo(sx(i * p), vh);
+      }
+      for (let j = Math.floor(y0 / p); j <= Math.ceil(y1 / p); j++) {
+        ctx.moveTo(0, sy(j * p)); ctx.lineTo(vw, sy(j * p));
+      }
     }
+    ctx.stroke();
+    return;
   }
+  ctx.fillStyle = col;
+  const half = s / 2;
+  forEachLatticePoint(type, p, x0, y0, x1, y1, (x, y) => {
+    ctx.fillRect(sx(x) - half, sy(y) - half, s, s);
+  });
 }
 
 function drawGround() {
@@ -341,7 +398,7 @@ function drawGesture() {
 function snapPointForGesture() {
   const hit = hitNode(gesture.sx, gesture.sy);
   if (hit && hit.id !== gesture.from) return { x: hit.x, y: hit.y };
-  return { x: snap(wx(gesture.sx)), y: snap(wy(gesture.sy)) };
+  return snapPt(wx(gesture.sx), wy(gesture.sy));
 }
 
 // ============================================================
@@ -504,7 +561,8 @@ canvas.addEventListener('pointermove', ev => {
     gesture.moved = true;
     const n = getNode(state, gesture.id);
     if (n) {
-      n.x = snap(wx(nx)); n.y = snap(wy(ny));
+      const t = snapPt(wx(nx), wy(ny));
+      n.x = t.x; n.y = t.y;
       n.px = n.x; n.py = n.y;   // carry, do not fling
     }
   } else if (gesture.type === 'dragGroup' && p.moved) {
@@ -513,8 +571,8 @@ canvas.addEventListener('pointermove', ev => {
     if (lead) {
       // the grabbed node snaps; everyone else follows by the same delta,
       // so the group's internal geometry is untouched
-      const tx = snap(wx(nx)), ty = snap(wy(ny));
-      const dx = tx - lead.x, dy = ty - lead.y;
+      const t = snapPt(wx(nx), wy(ny));
+      const dx = t.x - lead.x, dy = t.y - lead.y;
       for (const id of gesture.ids) {
         const n = getNode(state, id);
         if (!n) continue;
@@ -592,7 +650,8 @@ function tapAt(px, py) {
     if (n) { select('node', n.id); return; }
     if (m) { select('member', m.id); return; }
     pushUndo();
-    const nn = addNode(state, snap(wx(px)), snap(wy(py)));   // born at rest where placed
+    const t = snapPt(wx(px), wy(py));
+    const nn = addNode(state, t.x, t.y);   // born at rest where placed
     select('node', nn.id);
     markDirty();
     return;
@@ -616,7 +675,8 @@ function finishMember(g, p) {
   }
   pushUndo();
   if (!to) {
-    to = addNode(state, snap(wx(p.sx)), snap(wy(p.sy)));
+    const t = snapPt(wx(p.sx), wy(p.sy));
+    to = addNode(state, t.x, t.y);
   }
   const m = addMember(state, from, to, tool);
   if (m) {
@@ -816,7 +876,7 @@ function pasteClipboard() {
   else { tx = wx(vw / 2); ty = wy(vh / 2); }
   let dx = tx - b.cx, dy = ty - b.cy;
   if (b.y0 + dy < 0) dy = -b.y0;            // keep it above ground
-  if (snapOn) { dx = snap(dx); dy = snap(dy); }
+  if (snapOn) { const v = snapVec(dx, dy); dx = v.x; dy = v.y; }
   pushUndo();
   const ids = insertSub(state, clip.frag, dx, dy);
   if (running) rebuildBraces(state, true);
@@ -842,6 +902,7 @@ const propsEl = $('props');
 const propsBody = $('propsBody');
 $('propsClose').addEventListener('click', () => {
   if (sel.kind === 'world') select(null);
+  else if (sel.kind === 'grid') select(null);
   else propsEl.classList.remove('open');
 });
 
@@ -861,6 +922,7 @@ const LEGEND_HTML = `
   <p><span class="sw" style="background:#e3b341"></span><b>Actuator</b> - a muscle. Its length follows a wave. Give muscles different phases to make a gait.</p>
   <p><b>Anchor</b> - fixes a node to the world.</p>
   <p><b>Weld</b> - members meeting at a node keep their angles (rigid joint).</p>
+  <p><b>Grid</b> button: square or triangle lattice, pitch, brightness (<kbd>[</kbd> <kbd>]</kbd> change pitch). Per device, not saved with builds.</p>
   <p><b>Group</b> tool: box-select nodes, then copy / paste / mirror / move them. "Select body" on a node or member grabs the whole creature.</p>
   <p><b>Force view</b> (<kbd>F</kbd>) colors members: <span style="color:#ff5648">red = tension</span>, <span style="color:#40a0ff">blue = compression</span>. Full color = carrying the whole build's weight.</p>
   <p class="keys"><kbd>Space</kbd> run <kbd>R</kbd> reset <kbd>G</kbd> snap <kbd>Ctrl+Z</kbd> undo<br>
@@ -894,6 +956,11 @@ const TIPS = {
   mirror: 'Flip the group left-right about its centre. A mirrored walker walks the other way.',
   spread: 'Give the muscles evenly spaced phases from left to right - the quickest way to a gait.',
   force: 'Axial force through this member right now. Tension pulls its ends together, compression pushes them apart. Toggle the force view (F) to see the whole build.',
+  gtype: 'square = classic. triangles = every cell is an equilateral triangle: trusses, domes and hex frames snap exactly.',
+  gpitch: 'Distance between grid points, meters. Smaller = finer detail.',
+  gstyle: 'Dots or full lines.',
+  gbright: 'How visible the grid is. Turn it up on a phone in daylight.',
+  gsize: 'Dot size / line thickness in pixels.',
   friction: 'Friction coefficient. 0 = ice, 0.7 = rubber, 2 = glue. A foot only grips as hard as it is pressed down, so a lifting foot slides free.',
   drag: 'Air resistance. Higher = everything settles faster.',
   speed: 'Simulation speed. 0.25x for slow motion.',
@@ -902,7 +969,9 @@ const TIPS = {
 function renderProps() {
   $('worldBtn').classList.toggle('active', sel.kind === 'world');
   const n = selectedNode(), m = selectedMember();
+  $('gridBtn').classList.toggle('active', sel.kind === 'grid');
   if (sel.kind === 'world') { renderWorldProps(); openSheet(true); return; }
+  if (sel.kind === 'grid') { renderGridProps(); openSheet(true); return; }
   if (n) { renderNodeProps(n); openSheet(!narrow.matches); return; }   // phone: the pill is enough
   if (sel.kind === 'group') { renderGroupProps(); openSheet(true); return; }
   if (m) { renderMemberProps(m); openSheet(true); return; }
@@ -1025,6 +1094,36 @@ function deleteGroup() {
   select(null); markDirty();
 }
 
+function renderGridProps() {
+  propsBody.innerHTML = `
+    <div class="propTitle">Grid</div>
+    <p class="desc">Snap lattice for building. Lives on this device, not in the build file - open any save and change it to fit the design.</p>
+    ${propSelect('gtype', 'lattice', ['square', 'tri'], prefs.gridType, v => ({ square: 'square', tri: 'triangles (equilateral)' })[v])}
+    ${propSelect('gpitch', 'pitch', PITCHES.map(String), String(prefs.pitch), v => v + ' m')}
+    ${propSelect('gstyle', 'style', ['dots', 'lines'], prefs.gridStyle)}
+    ${propSlider('gbright', 'brightness', 0, 1, 0.05, prefs.gridBright, '')}
+    ${propSlider('gsize', 'dot / line size', 1, 4, 0.5, prefs.gridSize, 'px')}
+    <div class="propBtns"><button id="gReset">Defaults</button></div>`;
+  wirePref('gtype', v => { prefs.gridType = v; });
+  wirePref('gpitch', v => { prefs.pitch = parseFloat(v); });
+  wirePref('gstyle', v => { prefs.gridStyle = v; });
+  wirePref('gbright', v => { prefs.gridBright = parseFloat(v); });
+  wirePref('gsize', v => { prefs.gridSize = parseFloat(v); });
+  $('gReset').addEventListener('click', () => { prefs = { ...PREF_DEFAULTS }; savePrefs(); renderProps(); if (!running) draw(); });
+}
+// prefs are not part of the build: no undo entry, no autosave
+function wirePref(id, fn) {
+  const el = $('pp_' + id);
+  const ev = el.tagName === 'SELECT' ? 'change' : 'input';
+  el.addEventListener(ev, () => {
+    fn(el.value);
+    const pv = $('pv_' + id);
+    if (pv) pv.textContent = fmtVal(parseFloat(el.value)) + ' ' + pv.dataset.unit;
+    savePrefs();
+    if (!running) draw();
+  });
+}
+
 function renderWorldProps() {
   const W = state.world;
   propsBody.innerHTML = `
@@ -1127,6 +1226,19 @@ $('strainBtn').addEventListener('click', () => {
 $('worldBtn').addEventListener('click', () => {
   select(sel.kind === 'world' ? null : 'world');
 });
+$('gridBtn').addEventListener('click', () => {
+  select(sel.kind === 'grid' ? null : 'grid');
+});
+// [ and ] step the grid pitch through the standard set
+function stepPitch(dir) {
+  const i = PITCHES.indexOf(prefs.pitch);
+  const j = Math.max(0, Math.min(PITCHES.length - 1, i + dir));
+  prefs.pitch = PITCHES[j];
+  savePrefs();
+  setStatus(`Grid pitch ${prefs.pitch} m.`);
+  if (sel.kind === 'grid') renderProps();
+  if (!running) draw();
+}
 
 // toolbar state that lives in the world/build (gravity toggle, world panel)
 function syncToolbar() {
@@ -1172,6 +1284,8 @@ window.addEventListener('keydown', ev => {
   else if (k === 'r') $('resetBtn').click();
   else if (k === 'g') $('snapBtn').click();
   else if (k === 'f') $('strainBtn').click();
+  else if (k === '[') stepPitch(-1);
+  else if (k === ']') stepPitch(1);
   else if (k === 'v') setTool('select');
   else if (k === 'm') setTool('group');
   else if (k === 'n') setTool('node');
@@ -1383,6 +1497,9 @@ window.TF = {
   copy: copySelection, paste: pasteClipboard, duplicate: duplicateSelection,
   selectBody,
   get clip() { return clip; },
+  get prefs() { return prefs; },
+  set prefs(p) { prefs = { ...prefs, ...p }; savePrefs(); draw(); },
+  snapPt,
   get strain() { return strainOn; },
   set strain(v) { if (!!v !== strainOn) $('strainBtn').click(); },
   loadDemo,

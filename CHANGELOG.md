@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.0 - 2026-09-02
+
+Grid settings: lattice types, pitch set, brightness. 70/70 tests.
+
+- New `engine/lattice.js` (headless): square and equilateral-triangle
+  lattices, `snapToLattice` (joint x/y nearest point - a triangle grid
+  cannot be snapped per axis), `forEachLatticePoint`. Tests T17a-g.
+- Grid button + panel (per device, localStorage - NOT in the build
+  file, so open any save and switch the grid to fit it): lattice square
+  / triangles, pitch from a standard set (0.05 .. 1 m), dots or lines,
+  brightness, dot/line size, Defaults. Keys [ and ] step the pitch.
+- Default grid is much brighter (it was invisible on phones) and fades
+  in as you zoom rather than popping.
+- Every placement, drag, group move and paste offset snaps through the
+  lattice.
+
 ## 0.6.0 - 2026-09-02
 
 Copy / paste / mirror of substructures, group editing. 63/63 tests.
