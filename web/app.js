@@ -1263,6 +1263,9 @@ function podTargets() {
 function syncPod() {
   const pt = podTargets();
   if (!pt) { pod.hide(); return; }
+  // pick the corner for the CURRENT width (a page can start narrow, or
+  // 0 px wide in a preview pane, and grow); a dragged position wins
+  if (!pod._pos) pod.setCorner(narrow.matches ? 'bottom-right' : 'top-right');
   pod.show(pt.targets, { title: pt.title, active: pod.active && pod.active.key });
 }
 
