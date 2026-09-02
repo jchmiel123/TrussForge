@@ -59,8 +59,9 @@ load with the force view on.
   or equilateral-triangle lattice, pitch (0.05-1 m), dots or lines,
   brightness. Grid settings live on the device, not in the build file,
   so you can open any save and change the lattice to suit it.
-- Drag node-to-node (member tools) to connect; drag node-to-empty to
-  create the far node and the member in one gesture.
+- Member tools (Beam / Spring / Actuator) drag from anywhere: nodes are
+  created where needed, and a drag that starts or ends on a line welds a
+  hub into that line. Dropping a dragged node onto a line welds it in.
 - Tap a node: pill with Anchor / Weld / mass / Del. Tap a member: the
   properties panel (side panel on desktop, slide-up sheet on phones) with
   live sliders - tweak while the sim runs. Every control has a one-line
@@ -93,8 +94,11 @@ load with the force view on.
 - Beams and actuators are hard distance constraints; springs are soft,
   force-based (elastic + axial damping), so a lone mass on a spring rings
   at (1/2pi)sqrt(k/m) - the test suite checks exactly that.
-- Locked nodes are implemented by hidden bracing constraints between the
+- Welded nodes are implemented by hidden bracing constraints between the
   far endpoints of each pair of incident members (triangle rigidity).
+  The brace keeps the ANGLE: its length is recomputed every step from
+  the members' current lengths, so muscles and springs at a welded joint
+  work normally.
 - Ground at y=0: restitution ~0, Coulomb friction. The ground clamp
   records how far it pushed each node back up (the normal correction);
   friction may remove at most mu times that from the node's tangential
@@ -125,5 +129,10 @@ load with the force view on.
   real viewport (devtools emulation) for narrower layout checks.
 
 ## Roadmap
+
+- **Chains** (Justin, 2026-09-02): a chain / rope member built from many
+  short links between two points - sags under gravity, can wrap over
+  solid members, optionally solid itself. Probably its own tool that lays
+  N links along a drag, plus an engine `chain(state, a, b, links)` helper.
 
 - More demos (catapult, inchworm).

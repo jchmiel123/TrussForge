@@ -626,6 +626,63 @@ function measurePeriod(state, signal, seconds) {
   }
 }
 
+// ---- T21: a welded joint with an actuator stays rigid AND pumps ---------
+{
+  // anchor A, hub H welded, beam A-H horizontal, actuator H-B at 90 deg
+  // (pointing down), 1 kg at B. Fixed-length braces made this explode.
+  const build = () => {
+    const s = createState({ world: { drag: 0.5 } });
+    const A = addNode(s, 0, 2, { pinned: true });
+    const H = addNode(s, 1, 2, { locked: true });
+    const B = addNode(s, 1, 1);
+    addMember(s, A, H, 'beam');
+    const act = addMember(s, H, B, 'actuator', { wave: { type: 'sine', amp: 0.3, period: 1, phase: 0 } });
+    reset(s);
+    return { s, A, H, B, act };
+  };
+  const { s, A, H, B, act } = build();
+  let maxV = 0, worstAng = 0, worstLen = 0;
+  for (let i = 0; i < Math.round(6 / dt); i++) {
+    step(s, dt);
+    if (s.t < 1.5) continue;   // past the soft-start ramp
+    for (const n of s.nodes) maxV = Math.max(maxV, Math.hypot(n.x - n.px, n.y - n.py) / dt);
+    const v1 = [A.x - H.x, A.y - H.y], v2 = [B.x - H.x, B.y - H.y];
+    const ang = Math.abs(Math.atan2(v1[0] * v2[1] - v1[1] * v2[0], v1[0] * v2[0] + v1[1] * v2[1])) * 180 / Math.PI;
+    worstAng = Math.max(worstAng, Math.abs(ang - 90));
+    const want = targetLength(act, s.t, s.world.actuatorRamp);
+    worstLen = Math.max(worstLen, Math.abs(Math.hypot(B.x - H.x, B.y - H.y) - want) / want);
+  }
+  checkTrue('T21a welded actuator joint stays bounded', maxV < 20 && s.nodes.every(n => Number.isFinite(n.x)), `maxV=${fmt(maxV)} m/s`);
+  check('T21b weld holds the 90 deg angle while the muscle pumps', worstAng, 0, 1.5);
+  check('T21c the muscle still tracks its wave at the weld', worstLen, 0, 0.02);
+  // a welded spring stretches without the weld fighting it: straight
+  // chain anchor - spring - welded hub - beam - end, 2 kg below the spring
+  {
+    const s3 = createState({ world: { drag: 1 } });
+    const P3 = addNode(s3, 0, 3, { pinned: true });
+    const H3 = addNode(s3, 0, 2, { locked: true });
+    const C3 = addNode(s3, 0, 1);
+    addMember(s3, P3, H3, 'spring', { k: 60, c: 3 });
+    addMember(s3, H3, C3, 'beam');
+    reset(s3);
+    run(s3, Math.round(8 / dt));
+    check('T21d welded spring stretches by m*g/k', (3 - H3.y) - 1, 2 * 9.81 / 60, 0.005);
+  }
+  // an L on a spring swings so its centre of mass hangs under the anchor
+  // (the spring pivots freely at both ends) - the weld must still hold 90
+  const s2 = createState({ world: { drag: 1 } });
+  const P = addNode(s2, 0, 3, { pinned: true });
+  const Hb = addNode(s2, 0, 2, { locked: true });
+  const C = addNode(s2, 1, 2);
+  addMember(s2, P, Hb, 'spring', { k: 60, c: 3 });
+  addMember(s2, Hb, C, 'beam');
+  reset(s2);
+  run(s2, Math.round(8 / dt));
+  const v1 = [P.x - Hb.x, P.y - Hb.y], v2 = [C.x - Hb.x, C.y - Hb.y];
+  const ang = Math.abs(Math.atan2(v1[0] * v2[1] - v1[1] * v2[0], v1[0] * v2[0] + v1[1] * v2[1])) * 180 / Math.PI;
+  check('T21e weld holds 90 deg across the stretched spring', ang, 90, 1.5);
+}
+
 console.log('');
 const total = pass + fail;
 console.log(`${pass}/${total} checks passed${fail ? `  (${fail} FAILED)` : ''}`);

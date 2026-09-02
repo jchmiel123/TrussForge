@@ -28,7 +28,10 @@ Everything in-house and dependency-free.
   and confused the user). The weld is implemented as hidden distance constraints between
   the FAR endpoints of each pair of members at the locked node
   (`rebuildBraces`; pass `fromCurrent=true` when toggling mid-run so the
-  weld grabs the deformed pose instead of jolting). Member rest length
+  weld grabs the deformed pose instead of jolting). Braces store the
+  hub ANGLE (cos) + member ids; `braceLength()` in sim.js recomputes
+  the target each step from the members' current target lengths. A
+  fixed brace length made actuators at welded joints explode (0.10). Member rest length
   is taken from CURRENT positions on creation (safe mid-run adds).
   Substructures: `componentOf`, `extractSub` / `insertSub` (fragment =
   rest pose + verbatim members), `mirrorSub`, `translateSub` - all
@@ -89,6 +92,10 @@ Everything in-house and dependency-free.
     synthetic PointerEvents get wrong offsetX inside the preview pane.
   - `fitView` before the board has a size sets `pendingFit`; `resize`
     retries. The preview pane opens tabs at 0x0 first.
+  - Member tools start anywhere: gesture.from may be null (startX/Y
+    world point, startM = member under the start). `nodeAt(px, py)` =
+    existing node | welded hub split into the member there | new node.
+    `weldOntoMember` handles dropping a dragged node on a line.
   - Group selection: `sel = {kind:'group', ids:[...]}`; `groupSet()`
     helper; Group tool gestures `marquee` / `dragGroup` (lead node
     snaps, others follow by the same delta) / `dragNode` with
@@ -147,6 +154,13 @@ Everything in-house and dependency-free.
 - SemVer in `VERSION`; update `CHANGELOG.md` and the version constants
   in `web/app.js` (APP_VERSION, BUILD_DATE) with every feature commit -
   the version + build date badge on the page is a CodeLab convention.
+
+## To do (Justin's asks, keep this list)
+
+- **Chains**: chain / rope member = N short links between two nodes
+  (pass-through by default, solid optional), sags and wraps. Needs a
+  Chain tool (drag lays the links) + engine helper + a demo (crane /
+  pendulum). Asked 2026-09-02.
 
 ## Conventions
 

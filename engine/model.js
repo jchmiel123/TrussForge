@@ -125,11 +125,21 @@ export function membersAt(state, nodeId) {
   return state.members.filter(m => m.a === nodeId || m.b === nodeId);
 }
 
-// Rebuild the hidden bracing constraints implied by locked nodes.
-// For each locked node, every PAIR of incident members gets a distance
-// constraint between the two far endpoints, at their rest-pose distance
-// (pass fromCurrent=true to weld at the CURRENT deformed pose instead -
-// the editor uses that when a lock is toggled while the sim runs, so the
+// Rebuild the hidden bracing constraints implied by locked (welded)
+// nodes. For each locked node, every PAIR of incident members gets a
+// distance constraint between the two far endpoints - triangle rigidity.
+//
+// The brace stores the ANGLE at the hub (as its cosine), not a fixed
+// length: its target length is recomputed every step from the two
+// members' current lengths (law of cosines, see braceLength in sim.js).
+// A fixed length fought any member whose length changes - an actuator
+// at a welded joint made two rigid constraints disagree and the solver
+// launched the model (real bug, 0.10). Angle-preserving braces let a
+// welded muscle pump while the joint stays rigid, and let a welded
+// spring stretch.
+//
+// fromCurrent=true takes the angle from the CURRENT deformed pose (the
+// editor uses that when a lock is toggled while the sim runs, so the
 // weld does not jolt the structure back toward the build pose).
 // Call after any topology change or lock toggle.
 export function rebuildBraces(state, fromCurrent = false) {
@@ -142,11 +152,15 @@ export function rebuildBraces(state, fromCurrent = false) {
         const farA = getNode(state, inc[i].a === n.id ? inc[i].b : inc[i].a);
         const farB = getNode(state, inc[j].a === n.id ? inc[j].b : inc[j].a);
         if (!farA || !farB || farA.id === farB.id) continue;
-        const len = fromCurrent
-          ? Math.hypot(farB.x - farA.x, farB.y - farA.y)
-          : Math.hypot(farB.rx - farA.rx, farB.ry - farA.ry);
-        if (len < 1e-6) continue;
-        state.braces.push({ a: farA.id, b: farB.id, len });
+        const P = fromCurrent ? ['x', 'y'] : ['rx', 'ry'];
+        const ax = farA[P[0]] - n[P[0]], ay = farA[P[1]] - n[P[1]];
+        const bx = farB[P[0]] - n[P[0]], by = farB[P[1]] - n[P[1]];
+        const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+        if (la < 1e-6 || lb < 1e-6) continue;
+        const cos = Math.max(-1, Math.min(1, (ax * bx + ay * by) / (la * lb)));
+        const len = Math.sqrt(Math.max(0, la * la + lb * lb - 2 * la * lb * cos));
+        if (len < 1e-6) continue;   // members folded onto each other
+        state.braces.push({ a: farA.id, b: farB.id, hub: n.id, m1: inc[i].id, m2: inc[j].id, cos, len });
       }
     }
   }

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.11.0 - 2026-09-02
+
+Welds preserve angles (actuators at welded joints no longer explode),
+members start anywhere, drop-on-line welding, movable dial. 108/108.
+
+- Engine: weld braces store the rest ANGLE at the hub and recompute
+  their length each step from the members' current target lengths
+  (law of cosines; springs use their actual length). A fixed-length
+  brace fought any member whose length changed - a muscle at a welded
+  joint made two rigid constraints disagree and launched the model.
+  Tests T21a-e: welded muscle joint bounded, holds 90 deg to 1e-8 while
+  tracking its wave; welded spring stretches with the weld holding.
+- Beam / Spring / Actuator tools: drag from anywhere. Empty space makes
+  a node; starting or ending on a line welds a hub into it. A tap with a
+  member tool places a node (or a hub on a line).
+- Dragging a node (Select or Weld) and releasing it on a line splits the
+  line and welds the node into it.
+- ForgeKit 0.2.0: the pod has a grip bar - drag it anywhere, position
+  remembered, double-tap to snap home. TrussForge parks it top-right on
+  desktops (it was far away at the bottom) and bottom-right on phones.
+
 ## 0.10.0 - 2026-09-02
 
 ForgeKit: themes + dial pod. Weld tool with hubs and merging.

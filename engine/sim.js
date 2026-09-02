@@ -35,7 +35,7 @@
 // in), negative = compression. A 1 kg mass hanging on a beam reads
 // exactly +9.81 N; standing on one reads -9.81 N (tests T14).
 
-import { getNode } from './model.js';
+import { getNode, getMember } from './model.js';
 
 export const FIXED_DT = 1 / 240;
 export const CONTACT_R = 0.06;   // node vs solid-member contact distance, m
@@ -174,7 +174,7 @@ export function step(state, dt = FIXED_DT) {
     for (const br of state.braces) {
       const a = getNode(state, br.a), b = getNode(state, br.b);
       if (!a || !b) continue;
-      relax(a, b, br.len, 1);
+      relax(a, b, braceLength(state, br, t, W.actuatorRamp), 1);
     }
     if (solids) {
       for (const { m, ex } of solids) {
@@ -239,6 +239,23 @@ export function step(state, dt = FIXED_DT) {
     }
   }
   return state;
+}
+
+// Target length of a weld brace right now: law of cosines over the two
+// members' CURRENT target lengths (beam = rest, actuator = wave target,
+// spring = its actual stretched length) and the rest angle at the hub.
+export function braceLength(state, br, t, ramp) {
+  const m1 = getMember(state, br.m1), m2 = getMember(state, br.m2);
+  if (!m1 || !m2) return br.len;
+  const L = m => {
+    if (m.kind === 'spring') {
+      const a = getNode(state, m.a), b = getNode(state, m.b);
+      return a && b ? Math.hypot(b.x - a.x, b.y - a.y) : m.restLen;
+    }
+    return targetLength(m, t, ramp);
+  };
+  const la = L(m1), lb = L(m2);
+  return Math.sqrt(Math.max(0, la * la + lb * lb - 2 * la * lb * br.cos));
 }
 
 // Keep node n at least CONTACT_R from segment a-b (point-segment PBD).

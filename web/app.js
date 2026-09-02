@@ -19,7 +19,7 @@ import { snapToLattice, forEachLatticePoint, rowHeight, rowOffset, PITCHES } fro
 // CONFIG / VERSION
 // ============================================================
 
-const APP_VERSION = '0.10.0';
+const APP_VERSION = '0.11.0';
 const BUILD_DATE = '2026-09-02';
 const PREFS_KEY = 'trussforge.prefs';
 const NODE_R = 0.055;         // node draw radius, meters
@@ -408,8 +408,13 @@ function drawGesture() {
     return;
   }
   if (gesture.type !== 'member') return;
-  const a = getNode(state, gesture.from);
+  const a = gesture.from ? getNode(state, gesture.from) : { x: gesture.startX, y: gesture.startY };
   if (!a) return;
+  if (!gesture.from) {   // the start node does not exist yet: show where it will be
+    ctx.strokeStyle = `rgba(${theme.canvas.select}, .7)`;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(sx(a.x), sy(a.y), 7, 0, 7); ctx.stroke();
+  }
   ctx.strokeStyle = `rgb(${theme.canvas.select})`;
   ctx.lineWidth = 2.5;
   ctx.setLineDash([7, 6]);
@@ -426,7 +431,16 @@ function drawGesture() {
 function snapPointForGesture() {
   const hit = hitNode(gesture.sx, gesture.sy);
   if (hit && hit.id !== gesture.from) return { x: hit.x, y: hit.y };
+  // ending on a line: the hub will go at the nearest point of that line
+  const onM = hitMember(gesture.sx, gesture.sy, gesture.from ?? undefined);
+  if (onM) return nearestOnMember(onM, wx(gesture.sx), wy(gesture.sy));
   return snapPt(wx(gesture.sx), wy(gesture.sy));
+}
+function nearestOnMember(m, x, y) {
+  const a = getNode(state, m.a), b = getNode(state, m.b);
+  const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1e-12;
+  const t = Math.max(0.05, Math.min(0.95, ((x - a.x) * dx + (y - a.y) * dy) / l2));
+  return { x: a.x + t * dx, y: a.y + t * dy };
 }
 
 // ============================================================
@@ -443,9 +457,10 @@ function hitNode(px, py, exceptId) {
   return best;
 }
 
-function hitMember(px, py) {
+function hitMember(px, py, exceptNodeId) {
   let best = null, bestD = HIT_MEMBER_PX;
   for (const m of state.members) {
+    if (exceptNodeId !== undefined && (m.a === exceptNodeId || m.b === exceptNodeId)) continue;
     const [x1, y1, x2, y2] = memberEnds(m);
     const d = distToSeg(px, py, x1, y1, x2, y2);
     if (d < bestD) { bestD = d; best = m; }
@@ -562,8 +577,16 @@ canvas.addEventListener('pointerdown', ev => {
     // tap = toggle weld; drag onto another node = merge the two
     pushUndo();
     gesture = { type: 'dragNode', id: n.id, moved: false, weld: true };
-  } else if ((tool === 'beam' || tool === 'spring' || tool === 'actuator') && n) {
-    gesture = { type: 'member', from: n.id, sx: p.sx, sy: p.sy };
+  } else if (tool === 'beam' || tool === 'spring' || tool === 'actuator') {
+    if (n) {
+      gesture = { type: 'member', from: n.id, sx: p.sx, sy: p.sy };
+    } else {
+      // start anywhere: on a line = a welded hub goes in there, on empty
+      // space = a fresh node. Both are created on release, not now.
+      const onM = hitMember(p.sx, p.sy);
+      const st = snapPt(wx(p.sx), wy(p.sy));
+      gesture = { type: 'member', from: null, startM: onM ? onM.id : null, startX: st.x, startY: st.y, sx: p.sx, sy: p.sy };
+    }
   } else {
     gesture = { type: 'pan' };
   }
@@ -636,10 +659,14 @@ function endPointer(ev) {
   if (g && g.type === 'member') {
     finishMember(g, p);
   } else if (g && g.type === 'dragNode') {
+    const dropTarget = g.moved && !g.addToGroup ? hitMember(p.sx, p.sy, g.id) : null;
     if (g.moved && g.weld) {
       const to = hitNode(p.sx, p.sy, g.id);
-      if (to) mergeInto(to.id, g.id); else bakeNode(g.id);
-    } else if (g.moved) bakeNode(g.id);
+      if (to) mergeInto(to.id, g.id);
+      else if (dropTarget) weldOntoMember(g.id, dropTarget, p);
+      else bakeNode(g.id);
+    } else if (g.moved && dropTarget) weldOntoMember(g.id, dropTarget, p);
+    else if (g.moved) bakeNode(g.id);
     else if (g.addToGroup) toggleInGroup(g.id);
     else tapAt(p.sx, p.sy);
   } else if (g && g.type === 'dragGroup') {
@@ -705,27 +732,54 @@ function tapAt(px, py) {
   else select(null);
 }
 
+// A node at a spot: an existing node, a welded hub split into the member
+// under the spot, or a fresh node on the snap grid.
+function nodeAt(px, py, exceptNodeId) {
+  const n = hitNode(px, py, exceptNodeId);
+  if (n) return n;
+  const onM = hitMember(px, py, exceptNodeId);
+  if (onM) {
+    const t = snapPt(wx(px), wy(py));
+    const r = splitMember(state, onM.id, t.x, t.y);
+    if (r) return r.node;
+  }
+  const t = snapPt(wx(px), wy(py));
+  return addNode(state, t.x, t.y);
+}
+
 function finishMember(g, p) {
-  const from = getNode(state, g.from);
-  if (!from) return;
-  if (!p.moved) { select('node', from.id); return; }   // just a tap on a node
-  let to = hitNode(p.sx, p.sy);
-  if (to && to.id === from.id) return;
-  if (to && findMember(state, from.id, to.id)) {
-    setStatus('Those two nodes are already connected.');
-    select('member', findMember(state, from.id, to.id).id);
+  if (!g.from && !p.moved) {
+    // a tap with a member tool: put a node there (hub if on a line)
+    pushUndo();
+    const nn = nodeAt(p.sx, p.sy);
+    if (running) rebuildBraces(state, true);
+    select('node', nn.id); markDirty();
+    setStatus(nn.locked ? 'Welded hub added to the member. Drag from it to build on.' : 'Node placed. Drag from it to build on.');
     return;
   }
+  if (!p.moved) { select('node', g.from); return; }   // just a tap on a node
   pushUndo();
-  if (!to) {
-    const t = snapPt(wx(p.sx), wy(p.sy));
-    to = addNode(state, t.x, t.y);
+  let from = g.from ? getNode(state, g.from) : null;
+  if (!from) {
+    // the start point: hub into the line it began on, else a new node
+    if (g.startM) {
+      const r = splitMember(state, g.startM, g.startX, g.startY);
+      from = r ? r.node : null;
+    }
+    if (!from) from = addNode(state, g.startX, g.startY);
+  }
+  const to = nodeAt(p.sx, p.sy, from.id);
+  if (!to || to.id === from.id) { markDirty(); if (running) rebuildBraces(state, true); select('node', from.id); return; }
+  const dup = findMember(state, from.id, to.id);
+  if (dup) {
+    setStatus('Those two nodes are already connected.');
+    select('member', dup.id);
+    markDirty();
+    return;
   }
   const m = addMember(state, from, to, tool);
-  if (m) {
-    if (running) rebuildBraces(state, true);
-    select('member', m.id);
-  }
+  if (running) rebuildBraces(state, true);
+  if (m) select('member', m.id);
   markDirty();
 }
 
@@ -739,6 +793,24 @@ function insertHub(m, px, py) {
   markDirty();
   select('node', r.node.id);
   setStatus('Added a welded hub: the member stays straight. Unweld it (Weld tool or panel) for a hinge.');
+}
+
+// Drop a dragged node ONTO a member: split the member there (welded hub)
+// and merge the dragged node into the hub. The node's own members now
+// hang off the line. (Undo was pushed when the drag started.)
+function weldOntoMember(nodeId, m, p) {
+  const n = getNode(state, nodeId);
+  if (!n) return;
+  const mass = n.mass;
+  const r = splitMember(state, m.id, wx(p.sx), wy(p.sy));
+  if (!r) { bakeNode(nodeId); return; }
+  const keep = mergeNodes(state, r.node.id, nodeId);
+  keep.mass = mass;
+  if (running) rebuildBraces(state, true);
+  else { keep.rx = keep.x; keep.ry = keep.y; rebuildBraces(state); }
+  markDirty();
+  select('node', keep.id);
+  setStatus(`Welded onto the member: ${membersAt(state, keep.id).length} members meet here.`);
 }
 
 // Merge node dropId into keepId (weld tool drag-and-drop).
@@ -806,13 +878,13 @@ function bakeNode(id) {
 }
 
 const TOOL_HINTS = {
-  select: 'Drag a node to move it. Tap anything to see its settings.',
+  select: 'Drag a node to move it (drop it on a line to weld it in). Tap anything to see its settings.',
   group: 'Drag a box around nodes to group them. Tap a node to add or remove it. Drag a grouped node to move the group.',
   weld: 'Tap a node to weld / unweld it. Tap a beam to put a welded hub in it. Drag a node onto another node to merge them.',
   node: 'Tap empty space to place a node.',
-  beam: 'Drag from a node to another node (or to empty space) to add a rigid beam.',
-  spring: 'Drag from a node to add a stretchy spring.',
-  actuator: 'Drag from a node to add a muscle. Tap it afterwards to shape its wave.',
+  beam: 'Drag anywhere to add a rigid beam: nodes are made where needed. Start or end on a line to weld a hub into it.',
+  spring: 'Drag anywhere to add a stretchy spring. Start or end on a line to weld a hub into it.',
+  actuator: 'Drag anywhere to add a muscle, then tap it to shape its wave. Start or end on a line to weld a hub into it.',
   erase: 'Tap a node or member to delete it.',
 };
 
@@ -1019,7 +1091,8 @@ const LEGEND_HTML = `
   <p><b>Weld</b> - members meeting at a node keep their angles (rigid joint).</p>
   <p><b>View</b> button: theme (dark / soft / light paper), square or triangle lattice, pitch, brightness (<kbd>[</kbd> <kbd>]</kbd> change pitch). Per device, not saved with builds.</p>
   <p><b>Weld</b> tool (<kbd>W</kbd>): tap a node to weld it, tap a beam to add a welded hub, drag a node onto another to merge.</p>
-  <p><b>Dial</b>: the card over the board turns the selected thing's numbers. Chips pick which one; <b>=</b> opens the full sheet.</p>
+  <p><b>Dial</b>: the card over the board turns the selected thing's numbers. Chips pick which one; <b>=</b> opens the full sheet. Drag its grip bar to move it.</p>
+  <p><b>Lines</b>: beams, springs and muscles can start anywhere. Start or end a drag on a line, or drop a node on one, and a welded hub goes in there.</p>
   <p><b>Group</b> tool: box-select nodes, then copy / paste / mirror / move them. "Select body" on a node or member grabs the whole creature.</p>
   <p><b>Force view</b> (<kbd>F</kbd>) colors members: <span style="color:#ff5648">red = tension</span>, <span style="color:#40a0ff">blue = compression</span>. Full color = carrying the whole build's weight.</p>
   <p class="keys"><kbd>Space</kbd> run <kbd>R</kbd> reset <kbd>G</kbd> snap <kbd>Ctrl+Z</kbd> undo<br>
@@ -1072,6 +1145,10 @@ const TIPS = {
 // On phones the member / node sheet no longer opens by itself: turn the
 // dial, or press "=" for the full sheet.
 const pod = new ValuePod($('boardWrap'), {
+  // phones: bottom-right for the thumb; desktops: top-right, next to the
+  // panel and the toolbar. Drag the grip to move it; remembered.
+  position: narrow.matches ? 'bottom-right' : 'top-right',
+  storageKey: 'trussforge.pod',
   onStart: () => pushUndo(),
   onChange: () => { refreshSliders(); markDirty(); if (!running) draw(); else positionPill(); },
   onMore: () => { openSheet(true); },
