@@ -57,6 +57,18 @@ function measurePeriod(state, signal, seconds) {
   check('T1e square phase shifts window', waveValue(ph, 0.6), 1, 1e-9);
   const act = { kind: 'actuator', restLen: 2, wave: { type: 'sine', amp: 0.25, period: 1, phase: 0 } };
   check('T1f actuator target at wave peak', targetLength(act, 0.25), 2 * 1.25, 1e-9);
+  const tri = { type: 'triangle', period: 1, phase: 0 };
+  check('T1g triangle peak at P/4', waveValue(tri, 0.25), 1, 1e-12);
+  check('T1h triangle zero at P/2', waveValue(tri, 0.5), 0, 1e-12);
+  check('T1i triangle trough at 3P/4', waveValue(tri, 0.75), -1, 1e-12);
+  check('T1j triangle is linear (slope 4 in the first quarter)', waveValue(tri, 0.1), 0.4, 1e-12);
+  const sm = { type: 'smooth', period: 1, phase: 0, duty: 0.3 };
+  check('T1k smooth peaks mid-way through the long part (duty/2)', waveValue(sm, 0.15), 1, 1e-12);
+  check('T1l smooth troughs mid-way through the short part', waveValue(sm, 0.65), -1, 1e-12);
+  check('T1m smooth crosses zero at the duty boundary', waveValue(sm, 0.3), 0, 1e-12);
+  checkTrue('T1n smooth holds near +1 across the long part', waveValue(sm, 0.05) > 0.9 && waveValue(sm, 0.25) > 0.9,
+    `v(0.05)=${fmt(waveValue(sm, 0.05))}`);
+  checkTrue('T1o smooth is bounded in [-1, 1]', [...Array(200)].every((_, i) => Math.abs(waveValue(sm, i / 200)) <= 1 + 1e-12));
 }
 
 // ---- T2: soft spring SHM frequency vs (1/2pi)sqrt(k/m) ------------------
@@ -250,6 +262,13 @@ function measurePeriod(state, signal, seconds) {
   // deserialized state starts at the build pose
   checkTrue('T11e deserialized starts at rest pose',
     s2.nodes.every(n => n.x === n.rx && n.y === n.ry));
+  // project name rides along; legacy square waves load as smooth
+  checkTrue('T11f project name round-trips', s2.name === 'Walker', `name=${s2.name}`);
+  const legacy = JSON.parse(JSON.stringify(doc));
+  legacy.name = '  My Rig  '; legacy.members[0].wave.type = 'square';
+  const s3 = deserialize(legacy);
+  checkTrue('T11g name is trimmed', s3.name === 'My Rig');
+  checkTrue('T11h legacy square wave loads as smooth', s3.members[0].wave.type === 'smooth');
 }
 
 // ---- T12: locked-node braces regenerate on topology change --------------

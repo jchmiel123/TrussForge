@@ -41,12 +41,34 @@ export const FIXED_DT = 1 / 240;
 export const CONTACT_R = 0.06;   // node vs solid-member contact distance, m
 
 // Waveform value in [-1, 1]. phase is a fraction of the period (0..1).
+// All shapes share the sine's timing: 0 at s=0 rising, +1 (longest) a
+// quarter of the way through the "long" part, -1 (shortest) opposite.
+//   sine     - smooth push / pull.
+//   triangle - constant-speed back and forth.
+//   smooth   - holds long, holds short, rounded transitions; `duty` is
+//              the fraction of the cycle spent long. Built as tanh of a
+//              duty-warped sine, so it is C-infinity and never snaps.
+//   square   - legacy (pre-0.9 files load as smooth); kept for the tests.
+export const WAVE_TYPES = ['sine', 'triangle', 'smooth'];
+const SMOOTH_K = 3.5;
+const TANH_K = Math.tanh(SMOOTH_K);
+
 export function waveValue(w, t) {
   const period = Math.max(1e-6, w.period);
   const ph = t / period + (w.phase || 0);
   const s = ph - Math.floor(ph);
-  if (w.type === 'square') return s < (w.duty ?? 0.5) ? 1 : -1;
-  return Math.sin(2 * Math.PI * s);
+  const duty = Math.min(0.95, Math.max(0.05, w.duty ?? 0.5));
+  switch (w.type) {
+    case 'square': return s < duty ? 1 : -1;
+    case 'triangle':
+      return s < 0.25 ? 4 * s : s < 0.75 ? 2 - 4 * s : 4 * s - 4;
+    case 'smooth': {
+      // warp the phase so the first half-cycle (the long part) lasts `duty`
+      const sp = s < duty ? s / (2 * duty) : 0.5 + (s - duty) / (2 * (1 - duty));
+      return Math.tanh(SMOOTH_K * Math.sin(2 * Math.PI * sp)) / TANH_K;
+    }
+    default: return Math.sin(2 * Math.PI * s);
+  }
 }
 
 // Current target length of a member at time t. ramp (seconds) fades the

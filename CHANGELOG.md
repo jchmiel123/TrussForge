@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.9.0 - 2026-09-02
+
+Project name, save to server, new waveforms, start / stop lengths.
+
+- `tools/serve.py`: one Python server for the app AND a build library
+  (`/api/builds`: list / GET / PUT / DELETE, atomic writes, no-store
+  caching so redeploys take effect on reload). Library dir
+  `~/.trussforge-builds` (env TF_BUILDS_DIR), outside the app tree so
+  deploys never touch it. `tests/serve-smoke.py` exercises it.
+- Project name: an editable title in the toolbar, stored in the build
+  file (`name`). Demos name themselves. Document title follows it.
+- Save = PUT to the server under the project name (Ctrl+S); if the
+  server is unreachable the build downloads as `<name>.json` instead.
+  Open = the server library (Load / two-tap Del) plus "Open file..." and
+  "Download current". Opened files without a name take the file name.
+- Actuator waveforms: sine, triangle (constant speed), smooth (holds
+  long / holds short with rounded transitions, duty = time spent long).
+  Square is gone from the menu; old files that used it load as smooth.
+  Tests T1g-o.
+- Actuator panel edits short length and long length instead of rest
+  length + amplitude (the file keeps rest + amp, so nothing changes on
+  disk; the sliders map onto them).
+- 84/84 engine tests + 12 server checks.
+
 ## 0.8.0 - 2026-09-02
 
 Solid members (contact), phase detents, spring + anchor graphics, Reset

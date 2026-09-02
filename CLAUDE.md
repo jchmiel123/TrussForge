@@ -52,7 +52,10 @@ Everything in-house and dependency-free.
   Actuator target = rest * (1 + amp * env(t) * wave(t)); env is the
   world.actuatorRamp soft start - without it, a wave that is nonzero at
   t=0 snaps the rigid constraint in one step and kicks the build off
-  the ground (that was a real bug, do not remove).
+  the ground (that was a real bug, do not remove). Waves: sine /
+  triangle / smooth (tanh of a duty-warped sine; `square` is legacy and
+  loads as smooth). The UI edits SHORT / LONG lengths; the file keeps
+  restLen + amp (lo = rest(1-amp), hi = rest(1+amp)).
 - `engine/demos.js` - walker + hopper + bridge + merry (+ `DEMO_HINTS`
   for the UI: status text, forceView). Bridge = 4-bay Warren truss at
   y=1 (nothing touches the ground), LEFT end anchored, RIGHT end on a
@@ -89,6 +92,9 @@ Everything in-house and dependency-free.
     `addToGroup` (tap toggles membership). Clipboard `clip` = {frag,
     src} in localStorage; `pasteClipboard` picks the spot (right of the
     source if on screen, else mid-view, never below ground).
+  - Project name: `state.name` (in the file); `#projName` input in the
+    toolbar, `syncName()` after every state swap. Save = `saveToServer`
+    (PUT /api/builds/<name>, download fallback); Open = `#libModal`.
   - Force view (`strainOn`, key F): `strainStyle(f)` maps f / fRef to
     gray->red / gray->blue; fRef = total unpinned mass * g (floor 5 N),
     recomputed per draw. Member panel `#pv_force` is refreshed by
@@ -100,9 +106,12 @@ Everything in-house and dependency-free.
 ## Hosting (VULCAN)
 
 - Lives on Vulcan at ~/vulcan/repos/TrussForge, served by launchd agent
-  com.vulcan.trussforge (userland python http.server, 0.0.0.0:8337,
-  repo root, KeepAlive). Open http://vulcan:8337/web/index.html - the
-  AnvilLab portal at http://vulcan/ has its card.
+  com.vulcan.trussforge running `tools/serve.py 8337 <repo> 0.0.0.0`
+  (userland python, KeepAlive) - static files + the build library API
+  (`/api/builds`, files in ~/.trussforge-builds OUTSIDE the repo so a
+  deploy never touches them). Open http://vulcan:8337/web/index.html -
+  the AnvilLab portal at http://vulcan/ has its card. After changing
+  serve.py: `launchctl kickstart -k gui/$(id -u)/com.vulcan.trussforge`.
 - Vulcan has NO git: deploy = `git archive` locally, scp the tarball,
   extract over ~/vulcan/repos/TrussForge. Static files - no restart
   needed. Restart anyway: `ssh vulcan "launchctl kickstart -k
@@ -113,8 +122,10 @@ Everything in-house and dependency-free.
 
 ## Dev workflow
 
-- Serve over http (`python -m http.server 8341`) - file:// blocks ES
-  module imports.
+- Serve with `python tools/serve.py 8329` (launch.json "trussforge" does
+  this) - file:// blocks ES module imports and plain http.server has no
+  library API and caches modules. `python tests/serve-smoke.py` checks
+  the API.
 - Headless verification:
   `chrome --headless=new --user-data-dir=<fresh> --dump-dom
   --virtual-time-budget=8000 ".../web/index.html?demo=walker&check=20"`

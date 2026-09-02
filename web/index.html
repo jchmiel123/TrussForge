@@ -9,7 +9,8 @@
 <body>
 <div id="app">
   <header id="toolbar">
-    <div class="brand">Truss<span>Forge</span><em id="ver">v0.8.0</em></div>
+    <div class="brand">Truss<span>Forge</span><em id="ver">v0.9.0</em></div>
+    <input id="projName" class="projName" maxlength="64" spellcheck="false" autocomplete="off" title="Project name - click to rename. Save stores it on the server under this name." value="Untitled">
     <div class="group">
       <button id="runBtn" class="accent" title="Run / pause the simulation (Space)">Run</button>
       <button id="resetBtn" title="Put everything back in the build pose (R)">Reset</button>
@@ -42,8 +43,8 @@
       <button id="gridBtn" title="Grid: lattice type, pitch, brightness (this device, not saved with the build)">Grid</button>
     </div>
     <div class="group right">
-      <button id="saveBtn" title="Save the build to a JSON file (Ctrl+S)">Save</button>
-      <button id="openBtn" title="Open a saved build file (Ctrl+O)">Open</button>
+      <button id="saveBtn" class="accent2" title="Save to the server under the project name (Ctrl+S). Falls back to a file download if the server is unreachable.">Save</button>
+      <button id="openBtn" title="Builds on the server, or open / download a file (Ctrl+O)">Open</button>
       <input type="file" id="openFile" accept=".json,application/json" style="display:none">
       <select id="demoSel" title="Load a demo build (your current build stays in Undo)">
         <option value="">Demo...</option>
@@ -101,6 +102,18 @@
     </aside>
   </div>
   <footer id="statusBar"><span id="status">Ready.</span><span id="hint"></span></footer>
+</div>
+<div id="libModal" class="hidden">
+  <div class="modalBox">
+    <h3>Builds</h3>
+    <p class="hint" id="libHint">Saved on the server - the same list on every device.</p>
+    <div id="libList"></div>
+    <div class="modalBtns">
+      <button id="libOpenFile" title="Open a .json build from this device">Open file...</button>
+      <button id="libDownload" title="Download the current build as a .json file">Download current</button>
+      <button id="libClose">Close</button>
+    </div>
+  </div>
 </div>
 <div id="checkResult" style="display:none"></div>
 <script type="module" src="app.js"></script>

@@ -13,9 +13,11 @@ split, same known-answer testing discipline.
 # physics tests (must be 100%)
 node tests/run-tests.js
 
-# web UI - serve over http (file:// blocks ES modules)
-python -m http.server 8341
-# then open http://localhost:8341/web/index.html
+# web UI + build library (file:// blocks ES modules)
+python tools/serve.py 8329
+# then open http://localhost:8329/web/index.html
+# server smoke test
+python tests/serve-smoke.py
 ```
 
 Load the "Walker" demo and press Run. "Hopper" is the same body
@@ -36,10 +38,11 @@ load with the force view on.
   on it and slide along it with friction. Default is pass-through.
   Anchored solid beams make ramps, walls and platforms.
 - **Spring** - passive, stiffness + damping sliders.
-- **Actuator** - the muscle: a beam whose REST LENGTH follows a waveform.
-  Per actuator: sine or square (with duty cycle), amplitude (+/- fraction
-  of rest length), period, phase. All actuators share one global clock,
-  so phase relationships choreograph gaits.
+- **Actuator** - the muscle: a beam whose length swings between a SHORT
+  and a LONG length following a waveform: sine, triangle (constant
+  speed) or smooth (holds long, holds short, rounded ends, with a "time
+  spent long" duty). Period and phase per actuator; all actuators share
+  one global clock, so phase relationships choreograph gaits.
 
 ## Controls
 
@@ -57,7 +60,11 @@ load with the force view on.
   tip (hover on desktop, status line on phone). Nothing selected = a
   legend of what everything means.
 - One-finger drag on empty space pans; pinch zooms (mouse: wheel).
-- **Run/Pause**, **Reset** (restores the build pose), **Undo/Redo**,
+- **Project name**: click the title next to the logo to rename. **Save**
+  stores the build on the server under that name (Ctrl+S; falls back to
+  a file download when there is no server). **Open** lists the server
+  library and also opens / downloads files.
+- **Run/Pause**, **Reset** (restores the build pose and pauses), **Undo/Redo**,
   gravity toggle, follow-camera toggle, **World** (gravity, friction,
   drag, sim speed - opens in the properties panel), Save/Open (JSON file)
   plus localStorage autosave. Clear and Demo are undoable.

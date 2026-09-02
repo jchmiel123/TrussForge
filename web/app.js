@@ -8,7 +8,7 @@ import {
   serialize, deserialize, centroid, DEFAULTS,
   componentOf, extractSub, insertSub, mirrorSub, fragmentBounds,
 } from '../engine/model.js';
-import { step, memberForce, FIXED_DT } from '../engine/sim.js';
+import { step, memberForce, FIXED_DT, WAVE_TYPES } from '../engine/sim.js';
 import { DEMOS, DEMO_HINTS } from '../engine/demos.js';
 import { snapToLattice, forEachLatticePoint, rowHeight, rowOffset, PITCHES } from '../engine/lattice.js';
 
@@ -16,7 +16,7 @@ import { snapToLattice, forEachLatticePoint, rowHeight, rowOffset, PITCHES } fro
 // CONFIG / VERSION
 // ============================================================
 
-const APP_VERSION = '0.8.0';
+const APP_VERSION = '0.9.0';
 const BUILD_DATE = '2026-09-02';
 const PREFS_KEY = 'trussforge.prefs';
 const NODE_R = 0.055;         // node draw radius, meters
@@ -485,6 +485,7 @@ function restoreSnapshot(s) {
   state = deserialize(JSON.parse(s));     // lands in the build pose
   if (running) setRunning(false);
   syncToolbar();
+  syncName();
   syncUndoButtons();
   select(null);
   markDirty();
@@ -859,6 +860,33 @@ $('pillMass').addEventListener('click', cycleMass);
 $('pillDel').addEventListener('click', deleteSelectedNode);
 
 // ============================================================
+// PROJECT NAME  (lives in the build file; the title is the field)
+// ============================================================
+
+const nameEl = $('projName');
+function syncName() {
+  const nm = state.name || 'Untitled';
+  nameEl.value = nm;
+  nameEl.size = Math.max(6, Math.min(36, nm.length + 1));
+  document.title = `${nm} - TrussForge`;
+}
+nameEl.addEventListener('change', () => {
+  const v = nameEl.value.trim().slice(0, 64) || 'Untitled';
+  if (v !== state.name) {
+    pushUndo();
+    state.name = v;
+    markDirty();
+    setStatus(`Renamed to "${v}". Save stores it on the server under that name.`);
+  }
+  syncName();
+});
+nameEl.addEventListener('keydown', ev => {
+  if (ev.key === 'Enter' || ev.key === 'Escape') { ev.preventDefault(); nameEl.blur(); }
+  ev.stopPropagation();       // typing a name must not trigger tool shortcuts
+});
+nameEl.addEventListener('focus', () => nameEl.select());
+
+// ============================================================
 // CLIPBOARD  (copy / paste / duplicate of substructures)
 // ============================================================
 
@@ -962,12 +990,14 @@ const TIPS = {
   restLen: 'Length the member wants to be. Change it while paused to pre-stress the build.',
   k: 'How hard the spring pulls back per meter of stretch.',
   c: 'How fast the spring stops bouncing. 0 = rings forever.',
-  wtype: 'sine = smooth push/pull. square = snaps between long and short.',
-  amp: 'How far the length swings, as a fraction of rest length (+/-).',
+  wtype: 'sine = smooth push/pull. triangle = constant-speed back and forth. smooth = holds long, holds short, rounded transitions.',
+  lo: 'Shortest the muscle contracts to.',
+  hi: 'Longest the muscle extends to. It swings between the two lengths.',
+  amp: 'How far the length swings, as a fraction of the mid length (+/-).',
   period: 'Seconds per cycle. All muscles share one clock.',
   phase: 'Offset into the cycle. Stops at 1/24 steps so 1/2, 1/3, 1/4, 1/6, 1/8 and 1/12 land exactly. 1/2 = opposite of a phase-0 muscle.',
   solid: 'Solid members are surfaces: nodes of OTHER bodies land on them and slide with friction. Default is pass-through. Build ramps and platforms from anchored solid beams.',
-  duty: 'Fraction of each cycle spent long (square wave only).',
+  duty: 'Fraction of each cycle spent at the long length (smooth wave).',
   mass: 'Heavier nodes swing harder and sink into springs more.',
   anchor: 'Anchor: fixed to the world, never moves. Good for hanging things and pivots.',
   weld: 'Weld: members meeting here keep their angles. Needs 2+ members to do anything.',
@@ -1029,19 +1059,21 @@ function renderMemberProps(m) {
   rows.push(`<div class="toggles" data-tip="${TIPS.solid}" title="${TIPS.solid}">
     <button id="mSolid" class="${m.solid ? 'active' : ''}">${m.solid ? 'Solid: things collide with it' : 'Pass-through (tap for solid)'}</button></div>`);
   // a freeform build can be longer than the default range: widen it
-  const lenMax = Math.max(4, Math.ceil(m.restLen * 1.5 * 20) / 20);
-  rows.push(propSlider('restLen', 'rest length', 0.1, lenMax, 0.05, m.restLen, 'm'));
+  const lenMax = Math.max(4, Math.ceil(m.restLen * 1.6 * 20) / 20);
+  if (m.kind !== 'actuator') rows.push(propSlider('restLen', 'rest length', 0.1, lenMax, 0.05, m.restLen, 'm'));
   if (m.kind === 'spring') {
     rows.push(propSlider('k', 'stiffness', 1, 400, 1, m.k, 'N/m'));
     rows.push(propSlider('c', 'damping', 0, 10, 0.1, m.c, ''));
   }
   if (m.kind === 'actuator') {
-    rows.push(propSelect('wtype', 'waveform', ['sine', 'square'], m.wave.type));
-    rows.push(propSlider('amp', 'amplitude', 0, 0.45, 0.01, m.wave.amp, '+/-'));
+    const lo = m.restLen * (1 - m.wave.amp), hi = m.restLen * (1 + m.wave.amp);
+    rows.push(propSelect('wtype', 'waveform', WAVE_TYPES, WAVE_TYPES.includes(m.wave.type) ? m.wave.type : 'smooth'));
+    rows.push(propSlider('lo', 'short length', 0.05, lenMax, 0.01, lo, 'm'));
+    rows.push(propSlider('hi', 'long length', 0.05, lenMax, 0.01, hi, 'm'));
     rows.push(propSlider('period', 'period', 0.2, 4, 0.05, m.wave.period, 's'));
     rows.push(propSlider('phase', 'phase', 0, 1, 1 / 24, m.wave.phase, ''));
-    if (m.wave.type === 'square') {
-      rows.push(propSlider('duty', 'duty cycle', 0.05, 0.95, 0.05, m.wave.duty, ''));
+    if (m.wave.type === 'smooth' || m.wave.type === 'square') {
+      rows.push(propSlider('duty', 'time spent long', 0.05, 0.95, 0.05, m.wave.duty, ''));
     }
   }
   rows.push(`<div class="propRow readout" data-tip="${TIPS.force}" title="${TIPS.force}"><label>force <span class="pv" id="pv_force">${fmtForce(memberForce(m))}</span></label></div>`);
@@ -1049,17 +1081,31 @@ function renderMemberProps(m) {
   propsBody.innerHTML = rows.join('');
   $('mBody').addEventListener('click', () => selectBody(m.a));
 
-  wireProp('restLen', v => { m.restLen = v; rebuildBraces(state, running); });
+  if (m.kind !== 'actuator') wireProp('restLen', v => { m.restLen = v; rebuildBraces(state, running); });
   if (m.kind === 'spring') {
     wireProp('k', v => { m.k = v; });
     wireProp('c', v => { m.c = v; });
   }
   if (m.kind === 'actuator') {
     wireSel('wtype', v => { m.wave.type = v; renderProps(); });
-    wireProp('amp', v => { m.wave.amp = v; });
+    // short / long lengths map onto restLen (mid) + amp (half-swing / mid)
+    const setLoHi = (lo, hi) => {
+      let L = lo ?? m.restLen * (1 - m.wave.amp), H = hi ?? m.restLen * (1 + m.wave.amp);
+      if (lo != null && L > H - 0.02) H = L + 0.02;
+      if (hi != null && H < L + 0.02) L = H - 0.02;
+      L = Math.max(0.03, L); H = Math.max(L + 0.02, H);
+      m.restLen = (L + H) / 2;
+      m.wave.amp = (H - L) / (H + L);
+      rebuildBraces(state, running);
+      // keep the other slider honest when one pushes it
+      const other = lo != null ? ['hi', H] : ['lo', L];
+      const el = $('pp_' + other[0]); if (el) { el.value = other[1]; $('pv_' + other[0]).textContent = fmtVal(other[1]) + ' m'; }
+    };
+    wireProp('lo', v => setLoHi(v, null));
+    wireProp('hi', v => setLoHi(null, v));
     wireProp('period', v => { m.wave.period = v; });
     wireProp('phase', v => { m.wave.phase = v; });
-    if (m.wave.type === 'square') wireProp('duty', v => { m.wave.duty = v; });
+    if (m.wave.type === 'smooth' || m.wave.type === 'square') wireProp('duty', v => { m.wave.duty = v; });
   }
   wireSel('kind', v => { changeKind(m, v); });
   $('mSolid').addEventListener('click', () => {
@@ -1293,6 +1339,7 @@ $('clearBtn').addEventListener('click', () => {
   select(null);
   setRunning(false);
   syncToolbar();
+  syncName();
   markDirty();
   setStatus('Cleared. Ctrl+Z (or the undo arrow) brings it back.');
   draw();
@@ -1313,8 +1360,8 @@ window.addEventListener('keydown', ev => {
   const mod = ev.ctrlKey || ev.metaKey;
   if (mod && k === 'z') { ev.preventDefault(); if (ev.shiftKey) redo(); else undo(); }
   else if (mod && k === 'y') { ev.preventDefault(); redo(); }
-  else if (mod && k === 's') { ev.preventDefault(); saveFile(); }
-  else if (mod && k === 'o') { ev.preventDefault(); $('openFile').click(); }
+  else if (mod && k === 's') { ev.preventDefault(); saveToServer(); }
+  else if (mod && k === 'o') { ev.preventDefault(); openLibrary(); }
   else if (mod && k === 'c') { ev.preventDefault(); copySelection(); }
   else if (mod && k === 'v') { ev.preventDefault(); pasteClipboard(); }
   else if (mod && k === 'd') { ev.preventDefault(); duplicateSelection(); }
@@ -1333,7 +1380,7 @@ window.addEventListener('keydown', ev => {
   else if (k === 's') setTool('spring');
   else if (k === 'a') setTool('actuator');
   else if (k === 'e') setTool('erase');
-  else if (k === 'escape') select(null);
+  else if (k === 'escape') { if (!libModal.classList.contains('hidden')) closeLibrary(); else select(null); }
   else if (k === 'delete' || k === 'backspace') {
     if (selectedNode()) deleteSelectedNode();
     else if (sel.kind === 'group') deleteGroup();
@@ -1345,18 +1392,126 @@ window.addEventListener('keydown', ev => {
 // SAVE / OPEN / AUTOSAVE
 // ============================================================
 
-function saveFile() {
+// The build library lives on the server that serves the app
+// (tools/serve.py, same origin: no CORS). Save = PUT under the project
+// name; if the server is unreachable (file:// or a plain static host)
+// the build is downloaded as a file instead, so a save never silently
+// goes nowhere.
+function buildDoc() {
   const doc = serialize(state);
+  doc.savedAt = new Date().toISOString();
+  return doc;
+}
+const slug = s => (s || 'trussforge-build').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'trussforge-build';
+
+function downloadFile() {
+  const doc = buildDoc();
   const blob = new Blob([JSON.stringify(doc, null, 1)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'trussforge-build.json';
+  a.download = slug(state.name) + '.json';
   a.click();
   URL.revokeObjectURL(a.href);
-  setStatus('Saved.');
+  setStatus(`Downloaded ${a.download}.`);
 }
-$('saveBtn').addEventListener('click', saveFile);
-$('openBtn').addEventListener('click', () => $('openFile').click());
+
+async function api(path, opts) {
+  const r = await fetch('/api/builds' + path, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+
+async function saveToServer() {
+  const name = (state.name || '').trim();
+  if (!name || name === 'Untitled') {
+    setStatus('Give the build a name first (click the title), then Save.', true);
+    nameEl.focus();
+    return;
+  }
+  try {
+    const out = await api('/' + encodeURIComponent(name), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildDoc()),
+    });
+    setStatus(`Saved "${out.name}" to the server (${out.nodes} nodes, ${out.members} members).`);
+  } catch (e) {
+    downloadFile();
+    setStatus(`Server unreachable (${e.message}) - downloaded ${slug(name)}.json instead.`, true);
+  }
+}
+
+function adoptState(next, label) {
+  pushUndo();
+  state = next;
+  select(null);
+  setRunning(false);
+  syncToolbar();
+  syncName();
+  fitView();
+  markDirty();
+  setStatus(label);
+  draw();
+}
+
+const libModal = $('libModal');
+function openLibrary() {
+  libModal.classList.remove('hidden');
+  refreshLibrary();
+}
+function closeLibrary() { libModal.classList.add('hidden'); }
+async function refreshLibrary() {
+  const list = $('libList');
+  list.innerHTML = '<p class="hint">loading...</p>';
+  try {
+    const { builds } = await api('');
+    list.innerHTML = '';
+    $('libHint').textContent = 'Saved on the server - the same list on every device.';
+    if (!builds.length) {
+      list.innerHTML = '<p class="hint">Nothing saved yet. Name your build (click the title) and press Save.</p>';
+      return;
+    }
+    for (const b of builds) {
+      const row = document.createElement('div');
+      row.className = 'libRow' + (b.name === state.name ? ' current' : '');
+      const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = b.name;
+      const meta = document.createElement('span'); meta.className = 'meta';
+      const when = b.savedAt ? new Date(b.savedAt) : null;
+      meta.textContent = b.corrupt ? 'corrupt' :
+        `${b.nodes} nodes, ${b.members} members${when && !isNaN(when) ? ' - ' + when.toLocaleDateString() : ''}`;
+      const loadB = document.createElement('button'); loadB.textContent = 'Load';
+      loadB.onclick = async () => {
+        try {
+          const doc = await api('/' + encodeURIComponent(b.name));
+          adoptState(deserialize(doc), `Opened "${b.name}" from the server.`);
+          closeLibrary();
+        } catch (e) { setStatus(e.message, true); }
+      };
+      const delB = document.createElement('button'); delB.textContent = 'Del'; delB.className = 'danger';
+      delB.onclick = async () => {
+        if (delB.textContent === 'Del') {     // two-tap confirm, phone-friendly
+          delB.textContent = 'sure?';
+          setTimeout(() => { delB.textContent = 'Del'; }, 2500);
+          return;
+        }
+        try { await api('/' + encodeURIComponent(b.name), { method: 'DELETE' }); refreshLibrary(); }
+        catch (e) { setStatus(e.message, true); }
+      };
+      row.append(nm, meta, loadB, delB);
+      list.appendChild(row);
+    }
+  } catch (e) {
+    list.innerHTML = '';
+    $('libHint').textContent = `Server library unreachable (${e.message}). You can still open or download files.`;
+  }
+}
+$('saveBtn').addEventListener('click', saveToServer);
+$('openBtn').addEventListener('click', openLibrary);
+$('libClose').addEventListener('click', closeLibrary);
+$('libDownload').addEventListener('click', () => { downloadFile(); });
+$('libOpenFile').addEventListener('click', () => $('openFile').click());
+libModal.addEventListener('click', ev => { if (ev.target === libModal) closeLibrary(); });
 $('openFile').addEventListener('change', async ev => {
   const f = ev.target.files[0];
   ev.target.value = '';
@@ -1364,15 +1519,9 @@ $('openFile').addEventListener('change', async ev => {
   try {
     const doc = JSON.parse(await f.text());
     const next = deserialize(doc);
-    pushUndo();
-    state = next;
-    select(null);
-    setRunning(false);
-    syncToolbar();
-    fitView();
-    markDirty();
-    setStatus(`Opened ${f.name}.`);
-    draw();
+    if (!doc.name) next.name = f.name.replace(/\.json$/i, '').slice(0, 64) || 'Untitled';
+    adoptState(next, `Opened ${f.name}.`);
+    closeLibrary();
   } catch (e) {
     setStatus('Could not open that file: ' + e.message, true);
   }
@@ -1406,6 +1555,7 @@ function loadDemo(name, { keepUndo = true } = {}) {
   state = make();
   select(null);
   syncToolbar();
+  syncName();
   fitView();
   const hint = DEMO_HINTS[name] || {};
   if (hint.forceView && !strainOn) $('strainBtn').click();
@@ -1426,7 +1576,7 @@ function handleParams() {
   if (demo && DEMOS[demo]) loaded = loadDemo(demo, { keepUndo: false });
   if (!loaded) {
     if (loadAutosave()) {
-      syncToolbar(); fitView(); draw();
+      syncToolbar(); syncName(); fitView(); draw();
       setStatus('Restored your last build.');
     } else {
       loadDemo('walker', { keepUndo: false });
@@ -1546,7 +1696,10 @@ window.TF = {
   draw,
   fitView,
   serialize: () => serialize(state),
-  load: doc => { state = deserialize(doc); fitView(); draw(); },
+  load: doc => { state = deserialize(doc); syncName(); fitView(); draw(); },
+  saveToServer, openLibrary, downloadFile,
+  get name() { return state.name; },
+  set name(v) { state.name = v; syncName(); markDirty(); },
   play: () => setRunning(true),
   pause: () => setRunning(false),
   setTool,
@@ -1571,4 +1724,5 @@ handleParams();
 syncToolbar();
 syncUndoButtons();
 syncPasteButton();
+syncName();
 requestAnimationFrame(frame);

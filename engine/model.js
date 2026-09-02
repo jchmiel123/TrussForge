@@ -33,6 +33,7 @@ export const DEFAULTS = {
 
 export function createState(opts = {}) {
   return {
+    name: opts.name || 'Untitled',
     t: 0,
     nodes: [],
     members: [],
@@ -283,6 +284,9 @@ export function serialize(state) {
   return {
     app: 'trussforge',
     version: 1,
+    name: state.name || 'Untitled',
+    name: state.name || 'Untitled',
+    name: state.name || 'Untitled',
     world: { ...state.world },
     nodes: state.nodes.map(n => ({
       id: n.id, x: n.rx, y: n.ry,
@@ -306,6 +310,7 @@ export function deserialize(doc) {
     throw new Error('not a trussforge document');
   }
   const state = createState();
+  state.name = typeof doc.name === 'string' && doc.name.trim() ? doc.name.trim().slice(0, 64) : 'Untitled';
   state.world = { ...state.world, ...doc.world };
   let maxId = 0;
   for (const d of doc.nodes) {
@@ -326,6 +331,9 @@ export function deserialize(doc) {
       c: d.c ?? DEFAULTS.springC,
       wave: d.kind === 'actuator' ? { ...DEFAULTS.wave, ...d.wave } : null,
     };
+    // 'square' (pre-0.9) snapped between lengths in one step; 'smooth' is
+    // the same idea with rounded transitions and the same duty
+    if (m.wave && m.wave.type === 'square') m.wave.type = 'smooth';
     state.members.push(m);
     maxId = Math.max(maxId, d.id);
   }

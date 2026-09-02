@@ -25,6 +25,7 @@ export function walker() {
   addMember(s, F, H, 'beam');
   addMember(s, T, H, 'beam');
   s.world.friction = 0.7;
+  s.name = 'Walker';
   reset(s);
   return s;
 }
@@ -50,6 +51,7 @@ export function merry() {
     wave: { type: 'sine', amp: 0.3, period: 0.9, phase: 0 },
   });
   s.world.friction = 0.6;
+  s.name = 'Merry-go-round';
   reset(s);
   return s;
 }
@@ -71,6 +73,7 @@ export function hopper() {
   addMember(s, F, H, 'beam');
   addMember(s, T, H, 'beam');
   s.world.friction = 0.7;
+  s.name = 'Hopper';
   reset(s);
   return s;
 }
@@ -108,6 +111,7 @@ export function bridge() {
   addMember(s, mid, load, 'actuator', {
     wave: { type: 'sine', amp: 0.3, period: 1.6, phase: 0 },
   });
+  s.name = 'Bridge';
   reset(s);
   return s;
 }
