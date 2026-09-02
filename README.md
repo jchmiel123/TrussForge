@@ -18,7 +18,8 @@ python -m http.server 8341
 # then open http://localhost:8341/web/index.html
 ```
 
-Load the "Walker" demo and press Run.
+Load the "Walker" demo and press Run. "Hopper" is the same body
+driven into a bounding gait.
 
 ## What you build with
 
@@ -64,20 +65,25 @@ Load the "Walker" demo and press Run.
   at (1/2pi)sqrt(k/m) - the test suite checks exactly that.
 - Locked nodes are implemented by hidden bracing constraints between the
   far endpoints of each pair of incident members (triangle rigidity).
-- Ground at y=0: restitution ~0, Coulomb-ish friction (the friction
-  slider is the fraction of tangential speed removed per 1/60 s of
-  contact). Asymmetric loading across the gait is what makes creatures
-  crawl.
+- Ground at y=0: restitution ~0, Coulomb friction. The ground clamp
+  records how far it pushed each node back up (the normal correction);
+  friction may remove at most mu times that from the node's tangential
+  displacement. So a foot grips in proportion to how hard it is pressed
+  down and a lifting foot slides free - that asymmetry across the gait
+  is what makes creatures crawl. A free slider stops in v0^2 / (2 mu g),
+  which the tests check at two gravities.
 - Actuator amplitude fades in over ~0.8 s from t=0 (soft start), so a
   wave that starts at full throw does not kick the build off the ground.
 - Test suite: SHM frequency, pendulum period, beam strain under load,
   actuator waveform tracking, locked-angle preservation, 100k-step
-  boundedness, pinned-node immobility, walker locomotion - all against
-  independent closed-form math. `node tests/run-tests.js`, exit 0 = green.
+  boundedness, pinned-node immobility, Coulomb stopping distance (two
+  gravities, two masses), zero grip when unloaded, static hold, walker
+  locomotion at grip 0.3 and 2.0, hopper - all against independent
+  closed-form math. `node tests/run-tests.js`, exit 0 = green.
 
 ## Headless verification hooks
 
-- URL params: `?demo=walker|merry`, `&run=1` (auto-run),
+- URL params: `?demo=walker|hopper|merry`, `&run=1` (auto-run),
   `&check=N` (fast-forward N simulated seconds, publish centroid motion
   into `#checkResult` + `document.title` for `--dump-dom`),
   `&layout=1` (toolbar geometry dump).

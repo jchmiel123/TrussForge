@@ -7,7 +7,7 @@ import {
   getNode, centroid, rebuildBraces,
 } from '../engine/model.js';
 import { step, run, waveValue, targetLength, FIXED_DT } from '../engine/sim.js';
-import { walker, merry } from '../engine/demos.js';
+import { walker, hopper, merry } from '../engine/demos.js';
 
 let pass = 0, fail = 0;
 function check(name, got, want, tol) {
@@ -199,6 +199,19 @@ function measurePeriod(state, signal, seconds) {
   let maxY = 0;
   for (const n of s.nodes) maxY = Math.max(maxY, n.y);
   checkTrue('T9b walker stays near the ground', maxY < 3, `maxY=${fmt(maxY)}`);
+  // the crawl must stay forward on ice-ish AND sticky floors (Coulomb model)
+  const walkDx = mu => {
+    const w = walker(); w.world.friction = mu;
+    const a = centroid(w).x; run(w, Math.round(20 / dt));
+    return centroid(w).x - a;
+  };
+  const d03 = walkDx(0.3), d20 = walkDx(2.0);
+  checkTrue('T9c walker forward at grip 0.3', d03 > 1, `dx=${fmt(d03)} m`);
+  checkTrue('T9d walker forward at grip 2.0', d20 > 1, `dx=${fmt(d20)} m`);
+  const h = hopper();
+  const hx = centroid(h).x; run(h, Math.round(20 / dt));
+  checkTrue('T9e hopper bounds forward > 5 m in 20 s', centroid(h).x - hx > 5,
+    `dx=${fmt(centroid(h).x - hx)} m`);
 }
 
 // ---- T10: ground contact ------------------------------------------------
@@ -250,6 +263,51 @@ function measurePeriod(state, signal, seconds) {
   const brace = s.braces[0];
   check('T12c brace rest length is far-endpoint distance',
     brace.len, Math.hypot(1 - 0, 1 - 2), 1e-12);
+}
+
+// ---- T13: Coulomb friction is load-proportional --------------------------
+{
+  // stopping distance of a free slider on flat ground: d = v0^2 / (2 mu g)
+  const stopDist = (mu, g, v0) => {
+    const s = createState({ world: { friction: mu, gravity: g, drag: 0 } });
+    const n = addNode(s, 0, 0);
+    n.px = n.x - v0 * dt;
+    run(s, Math.round(4 / dt));
+    return n.x;
+  };
+  check('T13a stop distance v0^2/(2 mu g) at g=9.81', stopDist(0.5, 9.81, 2), 4 / (2 * 0.5 * 9.81), 0.02);
+  // same slider, weaker gravity = lighter normal load = longer slide (the
+  // old fixed-fraction model gave the same distance regardless of g)
+  check('T13b stop distance scales 1/g (g=4)', stopDist(0.5, 4, 2), 4 / (2 * 0.5 * 4), 0.04);
+  // decel is mu*g regardless of mass (cancels): 2 kg node, mu 0.8
+  {
+    const s = createState({ world: { friction: 0.8, drag: 0 } });
+    const n = addNode(s, 0, 0, { mass: 2 });
+    n.px = n.x - 1.5 * dt;
+    run(s, Math.round(2 / dt));
+    check('T13c mass cancels: d = v0^2/(2 mu g)', n.x, 1.5 * 1.5 / (2 * 0.8 * 9.81), 0.015);
+  }
+  // no normal load = no grip: a node touching the ground in zero gravity
+  // keeps its full tangential speed (a lifting foot must slide freely)
+  {
+    const s = createState({ world: { friction: 1.0, gravity: 0, drag: 0 } });
+    const n = addNode(s, 0, 0);
+    n.px = n.x - 1.0 * dt;
+    run(s, Math.round(1 / dt));
+    check('T13d unloaded contact has no grip', (n.x - n.px) / dt, 1.0, 1e-9);
+  }
+  // static friction: a node pushed sideways by a spring weaker than mu*m*g
+  // does not creep (closed form: it stays put)
+  {
+    const s = createState({ world: { friction: 0.6, drag: 0 } });
+    const a = addNode(s, 1.0, 0, { pinned: true });
+    const b = addNode(s, 0, 0);
+    // spring rest 0.5, stretched to 1.0: pull = k * 0.5 = 2 N  <  mu m g = 5.9 N
+    addMember(s, a, b, 'spring', { k: 4, c: 0 });
+    for (const m of s.members) m.restLen = 0.5;
+    run(s, Math.round(3 / dt));
+    check('T13e static friction holds against a weak pull', b.x, 0, 1e-3);
+  }
 }
 
 console.log('');

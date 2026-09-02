@@ -8,8 +8,14 @@
 //   3. iterations x relaxation passes over hard constraints:
 //      beams (rest length), actuators (waveform target length), braces
 //      (locked-node angle welds), ground position clamp.
-//   4. Ground velocity response: restitution 0 + Coulomb-ish friction
-//      (fraction of tangential velocity removed per contact step).
+//   4. Ground velocity response: restitution 0 + Coulomb friction.
+//      The ground clamp in (3) records, per node, how far it had to push
+//      the node back up this step (the normal correction, position
+//      units). Friction may remove at most mu * that amount from the
+//      tangential displacement: a foot grips in proportion to how hard
+//      it is pressed down, and a foot being lifted (no normal push)
+//      slides freely. A free node sliding on flat ground decelerates at
+//      exactly mu * g, so v0^2 / (2 mu g) is the stopping distance.
 // Pinned nodes have infinite mass: they never move.
 
 import { getNode } from './model.js';
@@ -96,6 +102,7 @@ export function step(state, dt = FIXED_DT) {
   // --- 3. constraint relaxation -------------------------------------------
   const iters = Math.max(1, W.iterations | 0);
   const gy = W.groundY;
+  for (const n of nodes) n._gn = 0;      // normal correction from the ground this step
   for (let it = 0; it < iters; it++) {
     for (const m of state.members) {
       if (m.kind === 'spring') continue;
@@ -109,21 +116,26 @@ export function step(state, dt = FIXED_DT) {
       relax(a, b, br.len, 1);
     }
     for (const n of nodes) {
-      if (!n.pinned && n.y < gy) n.y = gy;
+      if (!n.pinned && n.y < gy) { n._gn += gy - n.y; n.y = gy; }
     }
   }
 
   // --- 4. ground velocity response ----------------------------------------
-  // slip = fraction of tangential velocity removed this step; W.friction is
-  // the fraction removed per 1/60 s of continuous contact (0..1).
-  const f = Math.min(1, Math.max(0, W.friction));
-  const slip = f >= 1 ? 1 : 1 - Math.pow(1 - f, dt * 60);
+  // Coulomb: the tangential displacement removed this step is capped at
+  // mu * normal correction. Below the cap the node sticks (static
+  // friction); above it, it slides while shedding mu * g of speed per
+  // second (kinetic). No normal push (foot lifting) = no grip.
+  const mu = Math.max(0, W.friction);
   for (const n of nodes) {
     if (n.pinned) continue;
     if (n.y <= gy + 1e-6) {
       n.py = n.y;                       // restitution 0
-      const vtx = n.x - n.px;
-      n.px = n.x - vtx * (1 - slip);    // kill part of tangential velocity
+      const vt = n.x - n.px;            // tangential displacement this step
+      const cut = Math.min(Math.abs(vt), mu * n._gn);
+      // position correction, not just a velocity kill: moving x back also
+      // undoes this step's displacement, so a planted foot under a gentle
+      // side load truly holds instead of creeping by a*dt^2 every step.
+      n.x -= Math.sign(vt) * cut;
     }
   }
   return state;

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.0 - 2026-09-01
+
+Load-proportional (Coulomb) ground friction. Engine change; 38/38 tests.
+
+- Friction is now a coefficient mu: the tangential displacement removed
+  per step is capped at mu times the normal correction the ground clamp
+  applied that step. A foot grips in proportion to how hard it is pressed
+  down; a lifting foot slides free. A free slider decelerates at exactly
+  mu * g (stopping distance v0^2 / 2 mu g - tested at two gravities and
+  two masses). Applied as a position correction so static friction truly
+  holds (a velocity-only kill let planted feet creep by a*dt^2 per step).
+- The `friction` world value keeps its scale (0.7 default = rubber), so
+  existing saves stay sensible. Slider range widened to 2.
+- Walker gait re-tuned by sweep (1700 crawl candidates x 6 grips):
+  period 0.8, amps 0.30 / 0.18, phases 0 / 0.05 / 0.6. Forward for grip
+  0.3-2.0, faster on grippier floors, feet stay low. The old gait walked
+  backwards below mu 0.5 under the new model.
+- New demo: Hopper - same body, a bounding gait airborne ~60 % of the
+  time, forward for grip 0.2-2.0.
+- Tests: T13a-e (Coulomb closed forms, unloaded contact has no grip,
+  static hold), T9c-e (walker at grip 0.3 and 2.0, hopper).
+
 ## 0.2.0 - 2026-09-01
 
 UI clarity pass. Engine and file format unchanged (33/33 tests).

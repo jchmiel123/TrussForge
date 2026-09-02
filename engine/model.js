@@ -36,7 +36,7 @@ export function createState(opts = {}) {
     world: {
       gravity: 9.81,
       gravityOn: true,
-      friction: 0.6,     // 0..1, fraction of tangential speed removed per 1/60 s of contact
+      friction: 0.7,     // Coulomb coefficient mu (0 = ice, ~1 = rubber)
       drag: 0.08,        // air drag, 1/s
       groundY: 0,
       actuatorRamp: 0.8, // seconds to fade actuator amplitude in from t=0

@@ -13,12 +13,15 @@ export function walker() {
   const F = addNode(s, 0.9, 0.0);      // front foot
   const T = addNode(s, 0.45, 0.78);    // top / hip
   const H = addNode(s, 1.18, 0.62);    // head
-  // Gait tuned by sweep (2026-09-01): phases 0 / 0.25 / 0.5, period 1.0 s
-  // walks forward (+x) at ~27 cm/s and stays forward for friction 0.3-1.0.
-  const P = 1.0;                       // gait period, seconds
-  addMember(s, B, F, 'actuator', { wave: { type: 'sine', amp: 0.22, period: P, phase: 0.0 } });
-  addMember(s, B, T, 'actuator', { wave: { type: 'sine', amp: 0.20, period: P, phase: 0.25 } });
-  addMember(s, F, T, 'actuator', { wave: { type: 'sine', amp: 0.20, period: P, phase: 0.5 } });
+  // Gait re-tuned by sweep for Coulomb friction (0.3.0, 2026-09-01):
+  // period 0.8 s, stride amp 0.30, leg amp 0.18, phases 0 / 0.05 / 0.6.
+  // Crawls forward (+x) for grip 0.3-2.0 (4.5 m .. 15.5 m in 20 s, faster
+  // on grippier floors), feet lift < 0.31 m, airborne < 2 % of the time.
+  // The earlier gait (P 1.0, phases 0 / 0.25 / 0.5) reversed below mu 0.5.
+  const P = 0.8;                       // gait period, seconds
+  addMember(s, B, F, 'actuator', { wave: { type: 'sine', amp: 0.30, period: P, phase: 0.0 } });
+  addMember(s, B, T, 'actuator', { wave: { type: 'sine', amp: 0.18, period: P, phase: 0.05 } });
+  addMember(s, F, T, 'actuator', { wave: { type: 'sine', amp: 0.18, period: P, phase: 0.6 } });
   addMember(s, F, H, 'beam');
   addMember(s, T, H, 'beam');
   s.world.friction = 0.7;
@@ -51,4 +54,25 @@ export function merry() {
   return s;
 }
 
-export const DEMOS = { walker, merry };
+// Same body as the walker, driven hard and fast: a bounding hop that is
+// airborne ~60 % of the time. Found by the same sweep; forward for grip
+// 0.2-2.0 (13-35 m in 20 s). Shows off load-proportional friction: it
+// only pushes off while a foot is pressed down.
+export function hopper() {
+  const s = createState();
+  const B = addNode(s, 0.0, 0.0);
+  const F = addNode(s, 0.9, 0.0);
+  const T = addNode(s, 0.45, 0.78);
+  const H = addNode(s, 1.18, 0.62);
+  const P = 0.6;
+  addMember(s, B, F, 'actuator', { wave: { type: 'sine', amp: 0.34, period: P, phase: 0.0 } });
+  addMember(s, B, T, 'actuator', { wave: { type: 'sine', amp: 0.20, period: P, phase: 0.05 } });
+  addMember(s, F, T, 'actuator', { wave: { type: 'sine', amp: 0.20, period: P, phase: 0.6 } });
+  addMember(s, F, H, 'beam');
+  addMember(s, T, H, 'beam');
+  s.world.friction = 0.7;
+  reset(s);
+  return s;
+}
+
+export const DEMOS = { walker, hopper, merry };

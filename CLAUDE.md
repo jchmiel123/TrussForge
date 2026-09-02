@@ -33,16 +33,21 @@ Everything in-house and dependency-free.
 - `engine/sim.js` - `step(state, dt)` at FIXED_DT = 1/240:
   spring forces (soft, force-based - that is what makes the SHM
   frequency test exact) -> verlet integrate with gravity/drag ->
-  12 relaxation passes over beams/actuators/braces + ground clamp ->
-  ground velocity response (restitution 0, friction slider = fraction of
-  tangential speed removed per 1/60 s of contact).
+  12 relaxation passes over beams/actuators/braces + ground clamp (which
+  accumulates each node's normal correction `_gn`) -> ground response:
+  restitution 0 + Coulomb friction, tangential POSITION correction capped
+  at mu * `_gn` (position, not velocity-only: velocity-only let planted
+  feet creep a*dt^2 per step, T13e). `world.friction` IS mu (0..2).
   Actuator target = rest * (1 + amp * env(t) * wave(t)); env is the
   world.actuatorRamp soft start - without it, a wave that is nonzero at
   t=0 snaps the rigid constraint in one step and kicks the build off
   the ground (that was a real bug, do not remove).
-- `engine/demos.js` - walker + merry. The walker gait (phases 0 / 0.25 /
-  0.5, period 1.0) was tuned by sweep: forward for friction 0.3-1.0.
-  Gaits are chaotic-sensitive - re-run the T9 sweep before touching it.
+- `engine/demos.js` - walker + hopper + merry. Walker gait (period 0.8,
+  amps 0.30/0.18, phases 0/0.05/0.6) was tuned by sweep for the Coulomb
+  model: forward for grip 0.3-2.0, < 2 % airborne. Hopper = same body,
+  bounding. Gaits are chaotic-sensitive - re-run a sweep (score = WORST
+  dx across mu 0.3..2.0, constrain airborne fraction for a crawl) before
+  touching the engine's contact code or the gait numbers.
 - `tests/run-tests.js` - `node tests/run-tests.js`, exit 0 = pass.
 - `web/app.js` - board UI, organized with section banners. World y is UP
   in the engine; the renderer flips. `window.TF` console hooks (incl.

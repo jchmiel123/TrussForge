@@ -14,7 +14,7 @@ import { DEMOS } from '../engine/demos.js';
 // CONFIG / VERSION
 // ============================================================
 
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.3.0';
 const BUILD_DATE = '2026-09-01';
 const GRID = 0.25;            // snap pitch, meters
 const NODE_R = 0.055;         // node draw radius, meters
@@ -705,7 +705,7 @@ const TIPS = {
   anchor: 'Anchor: fixed to the world, never moves. Good for hanging things and pivots.',
   weld: 'Weld: members meeting here keep their angles. Needs 2+ members to do anything.',
   gravity: 'Downward pull in m/s^2. Earth is 9.8. 0 = floaty.',
-  friction: 'Grip on the ground. 0 = ice, 1 = sticky. Uneven grip across the gait is what makes creatures crawl.',
+  friction: 'Friction coefficient. 0 = ice, 0.7 = rubber, 2 = glue. A foot only grips as hard as it is pressed down, so a lifting foot slides free.',
   drag: 'Air resistance. Higher = everything settles faster.',
   speed: 'Simulation speed. 0.25x for slow motion.',
 };
@@ -789,7 +789,7 @@ function renderWorldProps() {
     <div class="propTitle">World</div>
     <p class="desc">Applies to the whole build. Saved with it.</p>
     ${propSlider('gravity', 'gravity', 0, 25, 0.1, W.gravity, 'm/s2')}
-    ${propSlider('friction', 'ground grip', 0, 1, 0.01, W.friction, '')}
+    ${propSlider('friction', 'ground grip', 0, 2, 0.01, W.friction, '')}
     ${propSlider('drag', 'air drag', 0, 2, 0.01, W.drag, '')}
     ${propSelect('speed', 'sim speed', ['0.25', '0.5', '1', '2', '4'], String(W.speed), v => v + 'x')}`;
   wireProp('gravity', v => { W.gravity = v; });
