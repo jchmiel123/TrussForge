@@ -6,10 +6,10 @@ import {
   createState, addNode, addMember, reset, serialize, deserialize,
   getNode, centroid, rebuildBraces,
   componentOf, extractSub, insertSub, mirrorSub, translateSub, fragmentBounds,
-  splitMember, mergeNodes, membersAt, getMember,
+  splitMember, mergeNodes, membersAt, getMember, chain,
 } from '../engine/model.js';
 import { step, run, waveValue, targetLength, memberForce, FIXED_DT, CONTACT_R } from '../engine/sim.js';
-import { walker, hopper, bridge, merry } from '../engine/demos.js';
+import { walker, hopper, bridge, merry, chainDemo } from '../engine/demos.js';
 import { snapToLattice, forEachLatticePoint, rowHeight } from '../engine/lattice.js';
 
 let pass = 0, fail = 0;
@@ -681,6 +681,75 @@ function measurePeriod(state, signal, seconds) {
   const v1 = [P.x - Hb.x, P.y - Hb.y], v2 = [C.x - Hb.x, C.y - Hb.y];
   const ang = Math.abs(Math.atan2(v1[0] * v2[1] - v1[1] * v2[0], v1[0] * v2[0] + v1[1] * v2[1])) * 180 / Math.PI;
   check('T21e weld holds 90 deg across the stretched spring', ang, 90, 1.5);
+}
+
+// ---- T22: chains -----------------------------------------------------------
+{
+  const g = 9.81;
+  // a) lay 10 links over 2 m: 9 nodes, 10 links, lengths sum to the span
+  {
+    const s = createState();
+    const a = addNode(s, 0, 2, { pinned: true }), b = addNode(s, 2, 2);
+    const r = chain(s, a, b, 10);
+    checkTrue('T22a chain(10) = 9 nodes + 10 links', r.nodes.length === 9 && r.members.length === 10 && r.members.every(m => m.kind === 'chain'));
+    check('T22b link lengths sum to the span', r.members.reduce((t, m) => t + m.restLen, 0), 2, 1e-9);
+  }
+  // b) hanging chain: links stay rigid, the bob hangs straight below at
+  //    the full chain length
+  {
+    // it starts horizontal and swings like a pendulum: damp it and wait
+    const s = createState({ world: { drag: 3 } });
+    const a = addNode(s, 0, 3, { pinned: true }), bob = addNode(s, 1.5, 3, { mass: 2 });
+    const r = chain(s, a, bob, 10);
+    reset(s);
+    run(s, Math.round(14 / dt));
+    let worst = 0;
+    for (const m of r.members) {
+      const p = getNode(s, m.a), q = getNode(s, m.b);
+      worst = Math.max(worst, Math.abs(Math.hypot(q.x - p.x, q.y - p.y) / m.restLen - 1));
+    }
+    check('T22c links stay rigid under load (worst strain)', worst, 0, 0.005);
+    check('T22d bob hangs straight below the anchor', bob.x, 0, 0.01);
+    check('T22e bob hangs at the full chain length', 3 - bob.y, 1.5, 0.01);
+  }
+  // c) chain between two anchors longer than the span sags symmetrically
+  {
+    const s = createState({ world: { drag: 1 } });
+    const a = addNode(s, 0, 2, { pinned: true }), b = addNode(s, 2, 2, { pinned: true });
+    const r = chain(s, a, b, 12);
+    for (const m of r.members) m.restLen = 0.2;   // 2.4 m of chain over a 2 m span
+    reset(s);
+    run(s, Math.round(6 / dt));
+    const mid = r.nodes[5];                         // 6th of 11 intermediates = centre
+    // parabola estimate: L ~ span + 8 s^2 / (3 span) -> s ~ 0.55 for 0.4 m of slack
+    check('T22f slack chain sags like a catenary (mid drop)', 2 - mid.y, 0.55, 0.12);
+    check('T22g the sag is symmetric', mid.x, 1, 0.02);
+  }
+  // d) wrap: the demo chain drapes over the solid bar and hangs from its end
+  {
+    const s = chainDemo();
+    const bar = s.members.find(m => m.solid);
+    const A = getNode(s, bar.a), B = getNode(s, bar.b);
+    const bob = s.nodes.find(n => n.mass === 2);
+    run(s, Math.round(6 / dt));
+    const dist = n => {
+      const dx = B.x - A.x, dy = B.y - A.y, l2 = dx * dx + dy * dy;
+      const t = Math.max(0, Math.min(1, ((n.x - A.x) * dx + (n.y - A.y) * dy) / l2));
+      return Math.hypot(n.x - (A.x + t * dx), n.y - (A.y + t * dy));
+    };
+    const links = s.nodes.filter(n => !n.pinned && n.mass !== 2);
+    const nearest = Math.min(...links.map(dist));
+    checkTrue('T22h no chain node passes through the solid bar', nearest > CONTACT_R - 0.01, `nearest=${fmt(nearest)}`);
+    checkTrue('T22i the bob ends up hanging below the bar', bob.y < B.y - 0.3, `bob y=${fmt(bob.y)}`);
+    checkTrue('T22j the chain bends over the bar end (some links touch it)', links.some(n => dist(n) < CONTACT_R + 0.02));
+    checkTrue('T22k wrap stays bounded', s.nodes.every(n => Number.isFinite(n.x) && Math.abs(n.x) < 10));
+  }
+  // e) chain links survive save / load
+  {
+    const s = chainDemo();
+    const s2 = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+    checkTrue('T22l chain kind round-trips', s2.members.filter(m => m.kind === 'chain').length === 14);
+  }
 }
 
 console.log('');

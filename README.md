@@ -22,7 +22,7 @@ python tests/serve-smoke.py
 
 Load the "Walker" demo and press Run. "Hopper" is the same body
 driven into a bounding gait. "Bridge" is a Warren truss under a pumping
-load with the force view on.
+load with the force view on. "Chain" drapes a chain over a solid bar.
 
 ## What you build with
 
@@ -34,6 +34,7 @@ load with the force view on.
     held - a rigid joint. Round nodes are free hinges. Needs 2+ members
     to do anything. (Engine field: `locked`.)
 - **Beam** - rigid stick.
+- **Chain** - a run of rigid links with light joints; sags, swings, wraps.
 - Any member can be **Solid** (member panel): nodes of other bodies land
   on it and slide along it with friction. Default is pass-through.
   Anchored solid beams make ramps, walls and platforms.
@@ -46,7 +47,9 @@ load with the force view on.
 
 ## Controls
 
-- **Palette**: Select / Group / Weld / Node / Beam / Spring / Actuator / Erase.
+- **Palette**: Select / Group / Weld / Node / Beam / Spring / Actuator / Chain / Erase.
+- **Chain** tool: drag to lay a run of rigid links (one per grid pitch).
+  Anchor an end, hang a weight, drape it over a solid member and it wraps.
 - **Weld** tool: tap a node to weld or unweld it; tap a beam to insert a
   welded hub (the beam stays one straight stick with a joint in it);
   drag a node onto another node to merge them into one welded joint.
@@ -119,7 +122,7 @@ load with the force view on.
 
 ## Headless verification hooks
 
-- URL params: `?demo=walker|hopper|bridge|merry`, `&run=1` (auto-run),
+- URL params: `?demo=walker|hopper|bridge|merry|chain`, `&run=1` (auto-run),
   `&check=N` (fast-forward N simulated seconds, publish centroid motion
   into `#checkResult` + `document.title` for `--dump-dom`),
   `&layout=1` (toolbar geometry dump).

@@ -1,7 +1,7 @@
 // TrussForge engine - built-in demo builds.
 // HEADLESS: shared by the Node test suite and the web UI.
 
-import { createState, addNode, addMember, reset } from './model.js';
+import { createState, addNode, addMember, reset, chain } from './model.js';
 
 // A small crawling creature: a triangle of three actuators (two legs and a
 // stride muscle) phased a quarter-period apart, plus a beam head for charm.
@@ -116,7 +116,23 @@ export function bridge() {
   return s;
 }
 
-export const DEMOS = { walker, hopper, bridge, merry };
+// A chain hung from an anchor with a 2 kg bob, laid out straight over an
+// anchored SOLID bar. The bob falls, the chain bends over the bar's end
+// and hangs from it - chains wrap over solid members.
+export function chainDemo() {
+  const s = createState();
+  const P = addNode(s, 0.2, 1.8, { pinned: true });
+  const bob = addNode(s, 2.3, 1.8, { mass: 2 });
+  chain(s, P, bob, 14);
+  const l = addNode(s, 0.6, 1.2, { pinned: true });
+  const r = addNode(s, 1.6, 1.2, { pinned: true });
+  addMember(s, l, r, 'beam', { solid: true });
+  s.name = 'Chain';
+  reset(s);
+  return s;
+}
+
+export const DEMOS = { walker, hopper, bridge, merry, chain: chainDemo };
 
 // UI hints per demo (the engine ignores these).
 export const DEMO_HINTS = {
@@ -124,4 +140,5 @@ export const DEMO_HINTS = {
   hopper: { status: 'Hopper: same body, driven hard. Press Run.' },
   bridge: { forceView: true, status: 'Bridge: red members pull, blue members push. Tap one for its force.' },
   merry: { status: 'Merry-go-round: anchored, welded hub. Press Run.' },
+  chain: { status: 'Chain: 14 links over a solid bar. Press Run and watch it wrap.' },
 };

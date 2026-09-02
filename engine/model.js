@@ -22,7 +22,12 @@
 //   actuator - beam whose REST LENGTH is driven by a waveform:
 //              target = restLen * (1 + amp * wave(t)).
 
-export const MEMBER_KINDS = ['beam', 'spring', 'actuator'];
+export const MEMBER_KINDS = ['beam', 'spring', 'actuator', 'chain'];
+//   chain    - a rigid link, physically a short beam; drawn as a link and
+//              laid in runs by chain(). Many light links = a chain or
+//              rope that sags, swings and wraps over solid members.
+export const CHAIN_LINK = 0.15;     // default link length, m
+export const CHAIN_NODE_MASS = 0.1; // per intermediate node, kg
 
 export const DEFAULTS = {
   springK: 60,        // N/m-ish (world units are meters, masses ~1 kg)
@@ -191,6 +196,34 @@ export function centroid(state) {
   let x = 0, y = 0, k = 0;
   for (const n of state.nodes) { x += n.x; y += n.y; k++; }
   return k ? { x: x / k, y: y / k } : { x: 0, y: 0 };
+}
+
+// ---- chains -------------------------------------------------------------
+
+// Lay a chain of `links` rigid links from node a to node b: links-1 light
+// intermediate nodes evenly spaced along the straight line a-b, joined by
+// 'chain' members. Straight at rest; gravity makes it sag. Returns
+// { nodes: [intermediates], members: [links] }.
+export function chain(state, a, b, links, opts = {}) {
+  const na = getNode(state, a), nb = getNode(state, b);
+  if (!na || !nb || na.id === nb.id) return null;
+  links = Math.max(1, Math.round(links));
+  const mass = opts.mass ?? CHAIN_NODE_MASS;
+  const nodes = [], members = [];
+  let prev = na;
+  for (let i = 1; i <= links; i++) {
+    let next;
+    if (i === links) next = nb;
+    else {
+      const t = i / links;
+      next = addNode(state, na.x + t * (nb.x - na.x), na.y + t * (nb.y - na.y), { mass });
+      nodes.push(next);
+    }
+    const m = addMember(state, prev, next, 'chain', { solid: !!opts.solid });
+    if (m) members.push(m);
+    prev = next;
+  }
+  return { nodes, members };
 }
 
 // ---- editing helpers: split a member, merge two nodes ----------------------

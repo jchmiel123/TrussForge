@@ -36,6 +36,9 @@ Everything in-house and dependency-free.
   Substructures: `componentOf`, `extractSub` / `insertSub` (fragment =
   rest pose + verbatim members), `mirrorSub`, `translateSub` - all
   headless, tested in T16 (mirrored walker walks backwards).
+  Chains: kind `chain` = rigid link (sim treats it exactly like a
+  beam); `chain(state, a, b, links)` lays a run with 0.1 kg joints.
+  Chain tool lays one link per grid pitch. T22.
   Editing: `splitMember` (welded hub into a member, t in 5..95 %) and
   `mergeNodes` (drop into keep, self-links + duplicate edges removed,
   masses add, joint welded) - T20.
@@ -157,10 +160,8 @@ Everything in-house and dependency-free.
 
 ## To do (Justin's asks, keep this list)
 
-- **Chains**: chain / rope member = N short links between two nodes
-  (pass-through by default, solid optional), sags and wraps. Needs a
-  Chain tool (drag lays the links) + engine helper + a demo (crane /
-  pendulum). Asked 2026-09-02.
+- (Chains shipped in 0.12.0.) Left on the roadmap: catapult / inchworm
+  demos.
 
 ## Conventions
 

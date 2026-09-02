@@ -11,7 +11,7 @@
 <body>
 <div id="app">
   <header id="toolbar">
-    <div class="brand">Truss<span>Forge</span><em id="ver">v0.11.0</em></div>
+    <div class="brand">Truss<span>Forge</span><em id="ver">v0.12.0</em></div>
     <input id="projName" class="projName" maxlength="64" spellcheck="false" autocomplete="off" title="Project name - click to rename. Save stores it on the server under this name." value="Untitled">
     <div class="group">
       <button id="runBtn" class="accent" title="Run / pause the simulation (Space)">Run</button>
@@ -54,6 +54,7 @@
         <option value="hopper">Hopper</option>
         <option value="bridge">Bridge</option>
         <option value="merry">Merry-go-round</option>
+        <option value="chain">Chain</option>
       </select>
       <button id="clearBtn" title="Clear the board (Undo brings it back)">Clear</button>
     </div>
@@ -87,6 +88,10 @@
       <div class="palItem" data-tool="actuator" title="Actuator: a muscle - its length follows a wave (A)">
         <svg viewBox="0 0 22 22" width="22" height="22"><path d="M4 18 L9 13 M13 9 L18 4" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><rect x="8.4" y="8.4" width="5.2" height="5.2" rx="1.2" fill="currentColor"/></svg>
         <div class="lbl">Actuator</div>
+      </div>
+      <div class="palItem" data-tool="chain" title="Chain: drag to lay a run of links (one per grid pitch). Sags, swings, wraps over solid members (C)">
+        <svg viewBox="0 0 22 22" width="22" height="22"><g fill="none" stroke="currentColor" stroke-width="1.9"><rect x="1.5" y="8" width="8" height="6" rx="3"/><rect x="7" y="8" width="8" height="6" rx="3"/><rect x="12.5" y="8" width="8" height="6" rx="3"/></g></svg>
+        <div class="lbl">Chain</div>
       </div>
       <div class="palItem" data-tool="erase" title="Erase: tap a node or member (E)">
         <svg viewBox="0 0 22 22" width="22" height="22"><path d="M4 13 L11 6 L18 13 L14 17 H8 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 17 L15 10" stroke="currentColor" stroke-width="2"/></svg>

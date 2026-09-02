@@ -7,7 +7,7 @@ import {
   getNode, getMember, findMember, membersAt, rebuildBraces, reset,
   serialize, deserialize, centroid, DEFAULTS,
   componentOf, extractSub, insertSub, mirrorSub, fragmentBounds,
-  splitMember, mergeNodes,
+  splitMember, mergeNodes, chain,
 } from '../engine/model.js';
 import { applyTheme, THEMES, themeNames } from './vendor/forgekit/theme.js';
 import { ValuePod } from './vendor/forgekit/pod.js';
@@ -19,7 +19,7 @@ import { snapToLattice, forEachLatticePoint, rowHeight, rowOffset, PITCHES } fro
 // CONFIG / VERSION
 // ============================================================
 
-const APP_VERSION = '0.11.0';
+const APP_VERSION = '0.12.0';
 const BUILD_DATE = '2026-09-02';
 const PREFS_KEY = 'trussforge.prefs';
 const NODE_R = 0.055;         // node draw radius, meters
@@ -171,8 +171,26 @@ function draw() {
 
   for (const m of state.members) drawMember(m);
   drawGesture();
+  chainNodes = chainNodeSet();
   for (const n of state.nodes) drawNode(n);
   positionPill();
+}
+
+// nodes whose members are ALL chain links draw small (they are the
+// chain's joints, not places you build on)
+let chainNodes = new Set();
+function chainNodeSet() {
+  const kinds = new Map();
+  for (const m of state.members) {
+    for (const id of [m.a, m.b]) {
+      const k = kinds.get(id);
+      if (k === undefined) kinds.set(id, m.kind === 'chain' ? 1 : 2);
+      else if (m.kind !== 'chain') kinds.set(id, 2);
+    }
+  }
+  const out = new Set();
+  for (const [id, k] of kinds) if (k === 1) out.add(id);
+  return out;
 }
 
 function drawGrid() {
@@ -280,11 +298,30 @@ function drawMember(m) {
     ctx.strokeStyle = col || theme.canvas.beam;
     ctx.lineWidth = w;
     ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  } else if (m.kind === 'chain') {
+    drawChainLink(x1, y1, x2, y2, col, w);
   } else if (m.kind === 'spring') {
     drawSpring(x1, y1, x2, y2, m, col);
   } else {
     drawActuator(x1, y1, x2, y2, a, b, m, w, col);
   }
+}
+
+// Chain link: a hollow capsule along the member, so a run of them reads
+// as a chain rather than a row of beams.
+function drawChainLink(x1, y1, x2, y2, col, w) {
+  const len = Math.hypot(x2 - x1, y2 - y1);
+  const h = Math.max(3, w * 0.9);
+  const pad = Math.min(len * 0.12, 2);
+  ctx.save();
+  ctx.translate((x1 + x2) / 2, (y1 + y2) / 2);
+  ctx.rotate(Math.atan2(y2 - y1, x2 - x1));
+  ctx.strokeStyle = col || theme.canvas.beam;
+  ctx.lineWidth = Math.max(1.4, w * 0.3);
+  ctx.beginPath();
+  ctx.roundRect(-len / 2 + pad, -h / 2, len - 2 * pad, h, h / 2);
+  ctx.stroke();
+  ctx.restore();
 }
 
 // Coil spring: the number of turns comes from the REST length (so the
@@ -356,7 +393,8 @@ function drawActuator(x1, y1, x2, y2, a, b, m, w, col) {
 function drawNode(n) {
   const x = sx(n.x), y = sy(n.y);
   // heavier nodes draw bigger (area ~ mass), capped so 4 kg stays tappable
-  const r = Math.max(4, NODE_R * cam.zoom) * Math.min(1.6, Math.sqrt(Math.max(0.3, n.mass)));
+  const small = chainNodes.has(n.id) && !n.pinned && !n.locked;
+  const r = Math.max(4, NODE_R * cam.zoom) * Math.min(1.6, Math.sqrt(Math.max(0.3, n.mass))) * (small ? 0.5 : 1);
   const gs = groupSet();
   const seld = (sel.kind === 'node' && sel.id === n.id) || (gs && gs.has(n.id));
   if (seld) {
@@ -577,7 +615,7 @@ canvas.addEventListener('pointerdown', ev => {
     // tap = toggle weld; drag onto another node = merge the two
     pushUndo();
     gesture = { type: 'dragNode', id: n.id, moved: false, weld: true };
-  } else if (tool === 'beam' || tool === 'spring' || tool === 'actuator') {
+  } else if (tool === 'beam' || tool === 'spring' || tool === 'actuator' || tool === 'chain') {
     if (n) {
       gesture = { type: 'member', from: n.id, sx: p.sx, sy: p.sy };
     } else {
@@ -777,6 +815,17 @@ function finishMember(g, p) {
     markDirty();
     return;
   }
+  if (tool === 'chain') {
+    // one link per grid pitch (at least 10 cm), straight; gravity sags it
+    const linkLen = Math.max(0.1, prefs.pitch);
+    const links = Math.max(1, Math.round(Math.hypot(to.x - from.x, to.y - from.y) / linkLen));
+    const r = chain(state, from, to, links);
+    if (running) rebuildBraces(state, true);
+    if (r && r.members.length) select('member', r.members[Math.floor(r.members.length / 2)].id);
+    setStatus(`Chain of ${links} link${links === 1 ? '' : 's'}. Anchor one end, or drape it over a solid member.`);
+    markDirty();
+    return;
+  }
   const m = addMember(state, from, to, tool);
   if (running) rebuildBraces(state, true);
   if (m) select('member', m.id);
@@ -885,6 +934,7 @@ const TOOL_HINTS = {
   beam: 'Drag anywhere to add a rigid beam: nodes are made where needed. Start or end on a line to weld a hub into it.',
   spring: 'Drag anywhere to add a stretchy spring. Start or end on a line to weld a hub into it.',
   actuator: 'Drag anywhere to add a muscle, then tap it to shape its wave. Start or end on a line to weld a hub into it.',
+  chain: 'Drag to lay a chain: one link per grid pitch. Anchor an end, hang a weight, or drape it over a solid member.',
   erase: 'Tap a node or member to delete it.',
 };
 
@@ -1086,6 +1136,7 @@ const LEGEND_HTML = `
   <p><span class="sw" style="background:#8b9cb6"></span><b>Beam</b> - rigid stick, holds its length.</p>
   <p><span class="sw" style="background:#58a6ff"></span><b>Spring</b> - stretchy; stiffness and damping.</p>
   <p><span class="sw" style="background:#e3b341"></span><b>Actuator</b> - a muscle. Its length follows a wave. Give muscles different phases to make a gait.</p>
+  <p><b>Chain</b> - a run of rigid links (Chain tool, <kbd>C</kbd>). Sags, swings, wraps over solid members.</p>
   <p><b>Anchor</b> - fixes a node to the world.</p>
   <p><b>Solid</b> (member panel) - a member other bodies land on and slide along. Pass-through by default. Anchored solid beams = ramps and platforms.</p>
   <p><b>Weld</b> - members meeting at a node keep their angles (rigid joint).</p>
@@ -1096,12 +1147,13 @@ const LEGEND_HTML = `
   <p><b>Group</b> tool: box-select nodes, then copy / paste / mirror / move them. "Select body" on a node or member grabs the whole creature.</p>
   <p><b>Force view</b> (<kbd>F</kbd>) colors members: <span style="color:#ff5648">red = tension</span>, <span style="color:#40a0ff">blue = compression</span>. Full color = carrying the whole build's weight.</p>
   <p class="keys"><kbd>Space</kbd> run <kbd>R</kbd> reset <kbd>G</kbd> snap <kbd>Ctrl+Z</kbd> undo<br>
-  <kbd>V</kbd> <kbd>M</kbd> <kbd>W</kbd> <kbd>N</kbd> <kbd>B</kbd> <kbd>S</kbd> <kbd>A</kbd> <kbd>E</kbd> tools <kbd>Del</kbd> delete<br>
+  <kbd>V</kbd> <kbd>M</kbd> <kbd>W</kbd> <kbd>N</kbd> <kbd>B</kbd> <kbd>S</kbd> <kbd>A</kbd> <kbd>C</kbd> <kbd>E</kbd> tools <kbd>Del</kbd> delete<br>
   <kbd>Ctrl+C</kbd> copy <kbd>Ctrl+V</kbd> paste <kbd>Ctrl+D</kbd> duplicate <kbd>Ctrl+A</kbd> all</p>
 </div>`;
 
 const MEMBER_DESC = {
   beam: 'Rigid stick. Holds its length exactly.',
+  chain: 'One rigid chain link. Runs of them sag, swing and wrap over solid members. The Chain tool lays a run in one drag.',
   spring: 'Stretchy. Stiffness sets the pull, damping kills the bounce.',
   actuator: 'A muscle: its length follows the wave. Offset the phase between muscles to make a gait.',
 };
@@ -1158,7 +1210,7 @@ function podTargets() {
   const n = selectedNode(), m = selectedMember();
   if (n) {
     return { title: 'Node', targets: [
-      { key: 'mass', label: 'mass', unit: 'kg', min: 0.2, max: 5, step: 0.1, get: () => n.mass, set: v => { n.mass = v; } },
+      { key: 'mass', label: 'mass', unit: 'kg', min: 0.05, max: 5, step: 0.05, get: () => n.mass, set: v => { n.mass = v; } },
     ] };
   }
   if (m) {
@@ -1180,7 +1232,7 @@ function podTargets() {
         T.push({ key: 'duty', label: 'long time', min: 0.05, max: 0.95, step: 0.05, get: () => m.wave.duty, set: v => { m.wave.duty = v; } });
       }
     }
-    return { title: { beam: 'Beam', spring: 'Spring', actuator: 'Actuator' }[m.kind], targets: T };
+    return { title: { beam: 'Beam', spring: 'Spring', actuator: 'Actuator', chain: 'Chain link' }[m.kind], targets: T };
   }
   if (sel.kind === 'group') {
     const gs = groupSet();
@@ -1256,7 +1308,7 @@ function renderNodeProps(n) {
       <button id="npAnchor" class="${n.pinned ? 'active' : ''}" data-tip="${TIPS.anchor}" title="${TIPS.anchor}">Anchor</button>
       <button id="npWeld" class="${n.locked ? 'active' : ''}" data-tip="${TIPS.weld}" title="${TIPS.weld}">Weld</button>
     </div>
-    ${propSlider('mass', 'mass', 0.2, 5, 0.1, n.mass, 'kg')}
+    ${propSlider('mass', 'mass', 0.05, 5, 0.05, n.mass, 'kg')}
     <div class="propBtns"><button id="npBody" data-tip="${TIPS.body}" title="${TIPS.body}">Select body</button><button id="npDel" class="danger">Delete node</button></div>`;
   $('npAnchor').addEventListener('click', toggleAnchor);
   $('npWeld').addEventListener('click', toggleWeld);
@@ -1267,10 +1319,10 @@ function renderNodeProps(n) {
 
 function renderMemberProps(m) {
   const rows = [];
-  const title = { beam: 'Beam', spring: 'Spring', actuator: 'Actuator' }[m.kind];
+  const title = { beam: 'Beam', spring: 'Spring', actuator: 'Actuator', chain: 'Chain link' }[m.kind];
   rows.push(`<div class="propTitle">${title}</div>`);
   rows.push(`<p class="desc">${MEMBER_DESC[m.kind]}</p>`);
-  rows.push(propSelect('kind', 'type', ['beam', 'spring', 'actuator'], m.kind));
+  rows.push(propSelect('kind', 'type', ['beam', 'spring', 'actuator', 'chain'], m.kind));
   rows.push(`<div class="toggles" data-tip="${TIPS.solid}" title="${TIPS.solid}">
     <button id="mSolid" class="${m.solid ? 'active' : ''}">${m.solid ? 'Solid: things collide with it' : 'Pass-through (tap for solid)'}</button></div>`);
   // a freeform build can be longer than the default range: widen it
@@ -1592,6 +1644,7 @@ window.addEventListener('keydown', ev => {
   else if (k === 'v') setTool('select');
   else if (k === 'm') setTool('group');
   else if (k === 'w') setTool('weld');
+  else if (k === 'c') setTool('chain');
   else if (k === 'n') setTool('node');
   else if (k === 'b') setTool('beam');
   else if (k === 's') setTool('spring');

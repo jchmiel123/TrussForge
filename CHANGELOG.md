@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.12.0 - 2026-09-02
+
+Chains. 120/120 tests.
+
+- Engine: member kind `chain` (a rigid link, physically a short beam)
+  and `chain(state, a, b, links)` that lays a run of light links
+  (0.1 kg per joint) along a straight line between two nodes. Chain
+  nodes collide with solid members like any node, so a chain drapes and
+  wraps. Tests T22a-l: link count and length sum, rigid under load, bob
+  hangs at full length straight below, slack chain sags like a catenary
+  (mid drop 0.55 m for 0.4 m of slack over 2 m) symmetrically, the demo
+  chain never passes through the solid bar and ends up hanging over its
+  end, round trip.
+- Chain tool (C): drag from anywhere, one link per grid pitch (min
+  10 cm). Links draw as hollow capsules; chain joints draw small.
+- Demo: Chain - 14 links from an anchor to a 2 kg bob, laid over a solid
+  bar; press Run and it wraps.
+- Node mass slider / dial now go down to 0.05 kg (chain joints).
+
 ## 0.11.0 - 2026-09-02
 
 Welds preserve angles (actuators at welded joints no longer explode),
