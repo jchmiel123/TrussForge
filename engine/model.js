@@ -150,6 +150,7 @@ export function reset(state) {
   for (const n of state.nodes) {
     n.x = n.rx; n.y = n.ry; n.px = n.rx; n.py = n.ry;
   }
+  for (const m of state.members) { m._f = 0; m._lam = 0; }
   state.t = 0;
   rebuildBraces(state);
 }

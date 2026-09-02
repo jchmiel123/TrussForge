@@ -9,7 +9,7 @@
 <body>
 <div id="app">
   <header id="toolbar">
-    <div class="brand">Truss<span>Forge</span><em id="ver">v0.3.0</em></div>
+    <div class="brand">Truss<span>Forge</span><em id="ver">v0.4.0</em></div>
     <div class="group">
       <button id="runBtn" class="accent" title="Run / pause the simulation (Space)">Run</button>
       <button id="resetBtn" title="Put everything back in the build pose (R)">Reset</button>
@@ -31,6 +31,9 @@
       </button>
       <button id="followBtn" class="icon" title="Camera follows the structure" aria-label="Follow">
         <svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><path d="M8 1 V3.5 M8 12.5 V15 M1 8 H3.5 M12.5 8 H15" stroke="currentColor" stroke-width="1.6"/></svg>
+      </button>
+      <button id="strainBtn" class="icon" title="Force view: red = tension, blue = compression (F)" aria-label="Force view">
+        <svg viewBox="0 0 16 16" width="16" height="16"><path d="M3.5 8 H12.5 M3.5 8 L6 5.5 M3.5 8 L6 10.5 M12.5 8 L10 5.5 M12.5 8 L10 10.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
       <button id="worldBtn" title="World settings: gravity, friction, drag, sim speed">World</button>
     </div>

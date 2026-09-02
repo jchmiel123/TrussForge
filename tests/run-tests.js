@@ -6,7 +6,7 @@ import {
   createState, addNode, addMember, reset, serialize, deserialize,
   getNode, centroid, rebuildBraces,
 } from '../engine/model.js';
-import { step, run, waveValue, targetLength, FIXED_DT } from '../engine/sim.js';
+import { step, run, waveValue, targetLength, memberForce, FIXED_DT } from '../engine/sim.js';
 import { walker, hopper, merry } from '../engine/demos.js';
 
 let pass = 0, fail = 0;
@@ -307,6 +307,60 @@ function measurePeriod(state, signal, seconds) {
     for (const m of s.members) m.restLen = 0.5;
     run(s, Math.round(3 / dt));
     check('T13e static friction holds against a weak pull', b.x, 0, 1e-3);
+  }
+}
+
+// ---- T14: member force readout vs statics -------------------------------
+{
+  const g = 9.81;
+  // a) 1 kg hanging on a beam from an anchor: tension = m g
+  {
+    const s = createState({ world: { gravity: g } });
+    const p = addNode(s, 0, 2, { pinned: true });
+    const b = addNode(s, 0, 1);
+    const m = addMember(s, p, b, 'beam');
+    run(s, Math.round(2 / dt));
+    check('T14a beam holding 1 kg reads +m*g (tension)', memberForce(m), g, g * 0.01);
+  }
+  // b) 2 kg standing on a beam over an anchor: compression = -m g
+  {
+    const s = createState({ world: { gravity: g } });
+    const p = addNode(s, 0, 0.5, { pinned: true });
+    const b = addNode(s, 0, 1.5, { mass: 2 });
+    const m = addMember(s, p, b, 'beam');
+    run(s, Math.round(2 / dt));
+    check('T14b beam under 2 kg reads -m*g (compression)', memberForce(m), -2 * g, 2 * g * 0.01);
+  }
+  // c) spring: settles at k*ext = m g
+  {
+    const s = createState({ world: { gravity: g } });
+    const p = addNode(s, 0, 3, { pinned: true });
+    const b = addNode(s, 0, 2);
+    const m = addMember(s, p, b, 'spring', { k: 100, c: 3 });
+    run(s, Math.round(8 / dt));
+    check('T14c spring holding 1 kg reads +m*g', memberForce(m), g, g * 0.01);
+  }
+  // d) two-bar truss: anchors at (0,2) and (0,1), 1 kg at (1,1) - in the
+  //    air (at y=0 the ground would carry half the load).
+  //    Statics: diagonal tension = m g sqrt(2), horizontal compression = m g.
+  {
+    const s = createState({ world: { gravity: g } });
+    const p1 = addNode(s, 0, 2, { pinned: true });
+    const p2 = addNode(s, 0, 1, { pinned: true });
+    const w = addNode(s, 1, 1);
+    const diag = addMember(s, p1, w, 'beam');
+    const horiz = addMember(s, p2, w, 'beam');
+    run(s, Math.round(3 / dt));
+    check('T14d truss diagonal = m*g*sqrt2 tension', memberForce(diag), g * Math.SQRT2, g * Math.SQRT2 * 0.03);
+    check('T14e truss horizontal = -m*g compression', memberForce(horiz), -g, g * 0.03);
+  }
+  // f) an unloaded beam lying on the ground reads ~0
+  {
+    const s = createState({ world: { gravity: g } });
+    const a = addNode(s, 0, 0), b = addNode(s, 1, 0);
+    const m = addMember(s, a, b, 'beam');
+    run(s, Math.round(1 / dt));
+    check('T14f unloaded beam reads ~0', memberForce(m), 0, 0.05);
   }
 }
 

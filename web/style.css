@@ -145,6 +145,8 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .propRow select { width: 100%; padding: 3px 6px; font-size: 12px; margin-top: 1px; margin-bottom: 3px; }
 .toggles { display: flex; gap: 5px; margin: 4px 0 6px; }
 .toggles button { flex: 1; padding: 5px 0; font-size: 12px; }
+.propRow.readout label { font-size: 11px; color: var(--dim); margin-top: 4px; }
+.propRow.readout .pv { color: var(--accent2); }
 .propBtns { display: flex; gap: 6px; margin-top: 8px; }
 .propBtns button { flex: 1; padding: 4px 0; font-size: 12px; }
 

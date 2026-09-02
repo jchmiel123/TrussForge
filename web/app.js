@@ -7,15 +7,15 @@ import {
   getNode, getMember, findMember, membersAt, rebuildBraces, reset,
   serialize, deserialize, centroid, DEFAULTS,
 } from '../engine/model.js';
-import { step, FIXED_DT } from '../engine/sim.js';
+import { step, memberForce, FIXED_DT } from '../engine/sim.js';
 import { DEMOS } from '../engine/demos.js';
 
 // ============================================================
 // CONFIG / VERSION
 // ============================================================
 
-const APP_VERSION = '0.3.0';
-const BUILD_DATE = '2026-09-01';
+const APP_VERSION = '0.4.0';
+const BUILD_DATE = '2026-09-02';
 const GRID = 0.25;            // snap pitch, meters
 const NODE_R = 0.055;         // node draw radius, meters
 const TAP_PX = 7;             // movement under this = a tap
@@ -37,6 +37,7 @@ let running = false;
 let tool = 'select';          // select | node | beam | spring | actuator | erase
 let snapOn = true;
 let follow = false;
+let strainOn = false;         // force view: color members by axial force
 let sel = { kind: null, id: 0 };       // kind: 'node' | 'member' | 'world' | null
 let cam = { x: 0.6, y: 0.9, zoom: 110 };   // world center + px per meter
 let toolHint = '';
@@ -109,10 +110,33 @@ function loadView() {
 // draw() is the ONLY place the board repaints. While paused the frame
 // loop does not call it (a static scene at 60 fps just burns phone
 // battery), so every paused edit path calls draw() itself.
+// Force view scale: a member carrying the whole build's weight is fully
+// saturated. Floor of 5 N so a weightless world still shows something.
+let fRef = 5;
+function forceRef() {
+  let mass = 0;
+  for (const n of state.nodes) if (!n.pinned) mass += n.mass;
+  return Math.max(5, mass * Math.abs(state.world.gravity));
+}
+// neutral gray -> red (tension) / blue (compression); {color, strength 0..1}
+function strainStyle(f) {
+  const t = Math.max(-1, Math.min(1, f / fRef));
+  const a = Math.pow(Math.abs(t), 0.7);
+  const [r0, g0, b0] = [139, 156, 182];
+  const [r1, g1, b1] = t > 0 ? [255, 86, 72] : [64, 160, 255];
+  const color = `rgb(${Math.round(r0 + (r1 - r0) * a)},${Math.round(g0 + (g1 - g0) * a)},${Math.round(b0 + (b1 - b0) * a)})`;
+  return { color, a };
+}
+const fmtForce = f => {
+  const kind = f > 0.05 ? ' tension' : f < -0.05 ? ' compression' : '';
+  return `${Math.abs(f).toFixed(1)} N${kind}`;
+};
+
 function draw() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = '#0d131a';
   ctx.fillRect(0, 0, vw, vh);
+  if (strainOn) fRef = forceRef();
 
   drawGrid();
   drawGround();
@@ -163,7 +187,13 @@ function memberEnds(m) {
 function drawMember(m) {
   const [x1, y1, x2, y2, a, b] = memberEnds(m);
   const seld = sel.kind === 'member' && sel.id === m.id;
-  const w = Math.max(2.5, 0.055 * cam.zoom);
+  let w = Math.max(2.5, 0.055 * cam.zoom);
+  let col = null;
+  if (strainOn) {
+    const st = strainStyle(memberForce(m));
+    col = st.color;
+    w *= 1 + 0.5 * st.a;             // loaded members also get thicker
+  }
   if (seld) {
     ctx.strokeStyle = 'rgba(47, 129, 247, .45)';
     ctx.lineWidth = w + 7;
@@ -172,17 +202,17 @@ function drawMember(m) {
   }
   ctx.lineCap = 'round';
   if (m.kind === 'beam') {
-    ctx.strokeStyle = '#8b9cb6';
+    ctx.strokeStyle = col || '#8b9cb6';
     ctx.lineWidth = w;
     ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
   } else if (m.kind === 'spring') {
-    drawSpring(x1, y1, x2, y2, m);
+    drawSpring(x1, y1, x2, y2, m, col);
   } else {
-    drawActuator(x1, y1, x2, y2, a, b, m, w);
+    drawActuator(x1, y1, x2, y2, a, b, m, w, col);
   }
 }
 
-function drawSpring(x1, y1, x2, y2, m) {
+function drawSpring(x1, y1, x2, y2, m, col) {
   const dx = x2 - x1, dy = y2 - y1;
   const len = Math.hypot(dx, dy) || 1;
   const ux = dx / len, uy = dy / len;       // axis
@@ -190,8 +220,8 @@ function drawSpring(x1, y1, x2, y2, m) {
   const zigs = 8;
   const ampPx = Math.max(3, 0.05 * cam.zoom);
   const lead = Math.min(len * 0.15, 10);    // straight leads at the ends
-  ctx.strokeStyle = '#58a6ff';
-  ctx.lineWidth = Math.max(1.5, 0.028 * cam.zoom);
+  ctx.strokeStyle = col || '#58a6ff';
+  ctx.lineWidth = Math.max(1.5, 0.028 * cam.zoom) * (col ? 1.4 : 1);
   ctx.lineJoin = 'round';
   ctx.beginPath();
   ctx.moveTo(x1, y1);
@@ -207,11 +237,12 @@ function drawSpring(x1, y1, x2, y2, m) {
   ctx.stroke();
 }
 
-function drawActuator(x1, y1, x2, y2, a, b, m, w) {
+function drawActuator(x1, y1, x2, y2, a, b, m, w, col) {
   const curLen = Math.hypot(b.x - a.x, b.y - a.y);
   const ext = (curLen - m.restLen) / (m.restLen || 1);   // -amp..+amp
-  // base rod
-  ctx.strokeStyle = '#55637a';
+  // base rod (takes the force color in force view; the core keeps its
+  // extension glow so you still see what the muscle is doing)
+  ctx.strokeStyle = col || '#55637a';
   ctx.lineWidth = w;
   ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
   // glowing core: brightness follows extension
@@ -681,6 +712,7 @@ const LEGEND_HTML = `
   <p><span class="sw" style="background:#e3b341"></span><b>Actuator</b> - a muscle. Its length follows a wave. Give muscles different phases to make a gait.</p>
   <p><b>Anchor</b> - fixes a node to the world.</p>
   <p><b>Weld</b> - members meeting at a node keep their angles (rigid joint).</p>
+  <p><b>Force view</b> (<kbd>F</kbd>) colors members: <span style="color:#ff5648">red = tension</span>, <span style="color:#40a0ff">blue = compression</span>. Full color = carrying the whole build's weight.</p>
   <p class="keys"><kbd>Space</kbd> run <kbd>R</kbd> reset <kbd>G</kbd> snap <kbd>Ctrl+Z</kbd> undo<br>
   <kbd>V</kbd> <kbd>N</kbd> <kbd>B</kbd> <kbd>S</kbd> <kbd>A</kbd> <kbd>E</kbd> tools <kbd>Del</kbd> delete</p>
 </div>`;
@@ -705,6 +737,7 @@ const TIPS = {
   anchor: 'Anchor: fixed to the world, never moves. Good for hanging things and pivots.',
   weld: 'Weld: members meeting here keep their angles. Needs 2+ members to do anything.',
   gravity: 'Downward pull in m/s^2. Earth is 9.8. 0 = floaty.',
+  force: 'Axial force through this member right now. Tension pulls its ends together, compression pushes them apart. Toggle the force view (F) to see the whole build.',
   friction: 'Friction coefficient. 0 = ice, 0.7 = rubber, 2 = glue. A foot only grips as hard as it is pressed down, so a lifting foot slides free.',
   drag: 'Air resistance. Higher = everything settles faster.',
   speed: 'Simulation speed. 0.25x for slow motion.',
@@ -760,6 +793,7 @@ function renderMemberProps(m) {
       rows.push(propSlider('duty', 'duty cycle', 0.05, 0.95, 0.05, m.wave.duty, ''));
     }
   }
+  rows.push(`<div class="propRow readout" data-tip="${TIPS.force}" title="${TIPS.force}"><label>force <span class="pv" id="pv_force">${fmtForce(memberForce(m))}</span></label></div>`);
   rows.push('<div class="propBtns"><button id="mDel" class="danger">Delete</button></div>');
   propsBody.innerHTML = rows.join('');
 
@@ -856,6 +890,7 @@ runBtn.addEventListener('click', () => setRunning(!running));
 $('resetBtn').addEventListener('click', () => {
   reset(state);
   setStatus('Reset to build pose.');
+  updateForceReadout();
   draw();
 });
 
@@ -874,6 +909,12 @@ $('gravBtn').addEventListener('click', () => {
 $('followBtn').addEventListener('click', () => {
   follow = !follow;
   $('followBtn').classList.toggle('active', follow);
+});
+$('strainBtn').addEventListener('click', () => {
+  strainOn = !strainOn;
+  $('strainBtn').classList.toggle('active', strainOn);
+  setStatus(strainOn ? 'Force view: red = tension, blue = compression.' : 'Force view off.');
+  if (!running) draw();
 });
 $('worldBtn').addEventListener('click', () => {
   select(sel.kind === 'world' ? null : 'world');
@@ -918,6 +959,7 @@ window.addEventListener('keydown', ev => {
   else if (k === ' ') { ev.preventDefault(); setRunning(!running); }
   else if (k === 'r') $('resetBtn').click();
   else if (k === 'g') $('snapBtn').click();
+  else if (k === 'f') $('strainBtn').click();
   else if (k === 'v') setTool('select');
   else if (k === 'n') setTool('node');
   else if (k === 'b') setTool('beam');
@@ -1104,7 +1146,14 @@ function frame(ts) {
     $('status').textContent =
       `t=${state.t.toFixed(1)}s  ${state.nodes.length} nodes, ${state.members.length} members`;
   }
+  updateForceReadout();
   draw();
+}
+
+function updateForceReadout() {
+  const m = selectedMember();
+  const el = m && $('pv_force');
+  if (el) el.textContent = fmtForce(memberForce(m));
 }
 
 // ============================================================
@@ -1114,7 +1163,10 @@ function frame(ts) {
 window.TF = {
   get state() { return state; },
   set state(s) { state = s; },
-  step: (n = 1) => { for (let i = 0; i < n; i++) step(state, FIXED_DT); draw(); },
+  step: (n = 1) => { for (let i = 0; i < n; i++) step(state, FIXED_DT); updateForceReadout(); draw(); },
+  memberForce,
+  get strain() { return strainOn; },
+  set strain(v) { if (!!v !== strainOn) $('strainBtn').click(); },
   loadDemo,
   draw,
   fitView,

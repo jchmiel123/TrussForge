@@ -38,6 +38,9 @@ Everything in-house and dependency-free.
   restitution 0 + Coulomb friction, tangential POSITION correction capped
   at mu * `_gn` (position, not velocity-only: velocity-only let planted
   feet creep a*dt^2 per step, T13e). `world.friction` IS mu (0..2).
+  `memberForce(m)`: springs = k*ext + c*vrel; rigid members = summed
+  relax() lambdas / dt^2 (+tension). Statics tests T14 - keep a loaded
+  test node OFF the ground or the floor carries part of the load.
   Actuator target = rest * (1 + amp * env(t) * wave(t)); env is the
   world.actuatorRamp soft start - without it, a wave that is nonzero at
   t=0 snaps the rigid constraint in one step and kicks the build off
@@ -65,6 +68,10 @@ Everything in-house and dependency-free.
     synthetic PointerEvents get wrong offsetX inside the preview pane.
   - `fitView` before the board has a size sets `pendingFit`; `resize`
     retries. The preview pane opens tabs at 0x0 first.
+  - Force view (`strainOn`, key F): `strainStyle(f)` maps f / fRef to
+    gray->red / gray->blue; fRef = total unpinned mass * g (floor 5 N),
+    recomputed per draw. Member panel `#pv_force` is refreshed by
+    `updateForceReadout()` each frame.
 - `web/index.html` / `web/style.css` - CircuitForge tokens (--bg #0d131a,
   --accent #2f81f7 family). Toolbar groups get `flex-shrink: 0` on
   mobile so rows wrap whole groups.

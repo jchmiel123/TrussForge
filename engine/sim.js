@@ -17,6 +17,14 @@
 //      slides freely. A free node sliding on flat ground decelerates at
 //      exactly mu * g, so v0^2 / (2 mu g) is the stopping distance.
 // Pinned nodes have infinite mass: they never move.
+//
+// Member force (memberForce): springs report k*ext + c*vrel directly.
+// For rigid members the relaxation corrections ARE the impulses the
+// member applied this step: relax() returns lambda = (dist - target) /
+// wsum per pass (a position-impulse), the passes are summed, and force =
+// sum / dt^2. Positive = tension (member was too long, pulled its ends
+// in), negative = compression. A 1 kg mass hanging on a beam reads
+// exactly +9.81 N; standing on one reads -9.81 N (tests T14).
 
 import { getNode } from './model.js';
 
@@ -47,7 +55,7 @@ const invMass = n => (n.pinned ? 0 : 1 / n.mass);
 function relax(a, b, target, stiff) {
   const wa = invMass(a), wb = invMass(b);
   const wsum = wa + wb;
-  if (wsum === 0) return;
+  if (wsum === 0) return 0;
   let dx = b.x - a.x, dy = b.y - a.y;
   let dist = Math.hypot(dx, dy);
   if (dist < 1e-9) { dx = 1e-9; dist = 1e-9; }
@@ -56,6 +64,13 @@ function relax(a, b, target, stiff) {
   a.y += dy * delta * wa;
   b.x -= dx * delta * wb;
   b.y -= dy * delta * wb;
+  return delta * dist;     // lambda: position-impulse, +ve = tension
+}
+
+// Axial force through a member after the last step, Newtons.
+// Positive = tension, negative = compression. 0 before the first step.
+export function memberForce(m) {
+  return m._f || 0;
 }
 
 // Advance the world by one fixed step of dt seconds.
@@ -67,6 +82,7 @@ export function step(state, dt = FIXED_DT) {
 
   // --- 1. spring forces -> per-node accelerations --------------------------
   for (const n of nodes) { n._fx = 0; n._fy = 0; }
+  for (const m of state.members) m._lam = 0;
   for (const m of state.members) {
     if (m.kind !== 'spring') continue;
     const a = getNode(state, m.a), b = getNode(state, m.b);
@@ -81,6 +97,7 @@ export function step(state, dt = FIXED_DT) {
     const vbx = (b.x - b.px) / dt, vby = (b.y - b.py) / dt;
     const vrel = (vbx - vax) * ux + (vby - vay) * uy;
     const f = m.k * ext + m.c * vrel;   // >0 pulls the ends together
+    m._f = f;                            // spring force = tension (+) / compression (-)
     a._fx += f * ux; a._fy += f * uy;
     b._fx -= f * ux; b._fy -= f * uy;
   }
@@ -108,7 +125,7 @@ export function step(state, dt = FIXED_DT) {
       if (m.kind === 'spring') continue;
       const a = getNode(state, m.a), b = getNode(state, m.b);
       if (!a || !b) continue;
-      relax(a, b, targetLength(m, t, W.actuatorRamp), 1);
+      m._lam += relax(a, b, targetLength(m, t, W.actuatorRamp), 1);
     }
     for (const br of state.braces) {
       const a = getNode(state, br.a), b = getNode(state, br.b);
@@ -118,6 +135,12 @@ export function step(state, dt = FIXED_DT) {
     for (const n of nodes) {
       if (!n.pinned && n.y < gy) { n._gn += gy - n.y; n.y = gy; }
     }
+  }
+
+  // rigid members: summed position-impulse -> force
+  const invDt2 = 1 / (dt * dt);
+  for (const m of state.members) {
+    if (m.kind !== 'spring') m._f = m._lam * invDt2;
   }
 
   // --- 4. ground velocity response ----------------------------------------

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0 - 2026-09-02
+
+Force view (member strain coloring) + force readout. 47/47 tests.
+
+- Engine: `memberForce(m)` - axial force through a member in Newtons,
+  +tension / -compression. Springs report k*ext + c*vrel; rigid members
+  sum their relaxation corrections (lambda = position-impulse) and divide
+  by dt^2. Reset zeroes it.
+- Tests T14a-f against statics: hanging mass = +m*g, standing mass =
+  -m*g, spring settles at m*g, two-bar truss (diagonal m*g*sqrt2 tension,
+  horizontal m*g compression, within 3 %), unloaded beam ~0.
+- Web: Force view toggle (toolbar arrows icon, key F). Members color
+  from neutral gray to red (tension) or blue (compression), thicker when
+  loaded; full color = carrying the whole build's weight (floor 5 N).
+  Actuator cores keep their extension glow. Legend explains it.
+- Member panel shows a live force readout ("12.3 N tension") that
+  updates while the sim runs.
+
 ## 0.3.0 - 2026-09-01
 
 Load-proportional (Coulomb) ground friction. Engine change; 38/38 tests.

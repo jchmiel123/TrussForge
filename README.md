@@ -54,7 +54,11 @@ driven into a bounding gait.
   gravity toggle, follow-camera toggle, **World** (gravity, friction,
   drag, sim speed - opens in the properties panel), Save/Open (JSON file)
   plus localStorage autosave. Clear and Demo are undoable.
-- Keys: Space run, R reset, G snap, V/N/B/S/A/E tools, Esc deselect,
+- **Force view** (toolbar arrows, key F): members turn red in tension
+  and blue in compression, brighter and thicker the more of the build's
+  weight they carry. The member panel shows a live "N tension /
+  compression" readout.
+- Keys: Space run, R reset, G snap, F force view, V/N/B/S/A/E tools, Esc deselect,
   Del delete, Ctrl+Z/Ctrl+Y undo/redo, Ctrl+S/Ctrl+O.
 
 ## Physics notes
@@ -78,8 +82,9 @@ driven into a bounding gait.
   actuator waveform tracking, locked-angle preservation, 100k-step
   boundedness, pinned-node immobility, Coulomb stopping distance (two
   gravities, two masses), zero grip when unloaded, static hold, walker
-  locomotion at grip 0.3 and 2.0, hopper - all against independent
-  closed-form math. `node tests/run-tests.js`, exit 0 = green.
+  locomotion at grip 0.3 and 2.0, hopper, member force vs statics
+  (hanging / standing mass, spring, two-bar truss) - all against
+  independent closed-form math. `node tests/run-tests.js`, exit 0 = green.
 
 ## Headless verification hooks
 
@@ -94,7 +99,6 @@ driven into a bounding gait.
 
 ## Roadmap
 
-- Member strain coloring / force readouts.
 - More demos (bridge under load, catapult, inchworm).
 - Copy/paste of substructures; mirror.
 - Actuator group editing (select several, phase-spread them).
