@@ -42,3 +42,30 @@
 @media (pointer: coarse) {
   .fk-col button { width: 44px; }
 }
+
+/* ---- Toasts: transient messages, bottom-centre stack ------------------- */
+.fk-toasts {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 6px; z-index: 60;
+  pointer-events: none; max-width: min(92vw, 420px);
+}
+.fk-toast {
+  pointer-events: auto; cursor: pointer;
+  background: var(--card, rgba(18, 26, 36, .94)); color: var(--text, #d3dce6);
+  border: 1px solid var(--border, #243244); border-left: 3px solid var(--accent, #2f81f7);
+  border-radius: 10px; padding: 8px 12px;
+  font: 12px/1.4 "Segoe UI", system-ui, sans-serif;
+  box-shadow: 0 6px 22px var(--shadow, rgba(0, 0, 0, .5));
+  opacity: 0; transform: translateY(8px);
+  transition: opacity .18s ease, transform .18s ease;
+}
+.fk-toast.fk-in { opacity: 1; transform: none; }
+.fk-toast.fk-out { opacity: 0; transform: translateY(4px); }
+.fk-toast.fk-ok { border-left-color: var(--ok, #3fb950); }
+.fk-toast.fk-warn { border-left-color: var(--warn, #e3b341); }
+.fk-toast.fk-err { border-left-color: var(--err, #f85149); }
+
+/* ---- Status line tones (statusLine sets data-tone) --------------------- */
+[data-tone="ok"] { color: var(--ok, #3fb950); }
+[data-tone="warn"] { color: var(--warn, #e3b341); }
+[data-tone="err"] { color: var(--err, #f85149); }
