@@ -60,12 +60,12 @@ body {
   padding: 4px 9px; color: var(--text);
 }
 #toolbar button:hover { border-color: var(--border); background: var(--panel2); }
-#toolbar button.active { background: var(--active); border-color: var(--accent); }
+#toolbar button.active { background: var(--active); border-color: var(--accent); color: var(--text); }
 #toolbar button.accent { background: var(--accent); border-color: var(--accent); padding: 4px 12px; }
 #toolbar button.accent:hover { background: var(--accent2); }
 #toolbar button.accent.running { background: var(--err); border-color: var(--err); }
 #toolbar button.icon { padding: 5px 7px; line-height: 0; color: var(--icon); }
-#toolbar button.icon:hover, #toolbar button.icon.active { color: #fff; }
+#toolbar button.icon:hover, #toolbar button.icon.active { color: var(--text); }
 #toolbar button.icon svg { display: block; }
 #toolbar button:disabled { opacity: .3; cursor: default; }
 #toolbar button:disabled:hover { border-color: transparent; background: transparent; color: var(--icon); }
@@ -80,7 +80,7 @@ button {
   padding: 5px 11px; cursor: pointer; font: inherit;
 }
 button:hover { border-color: var(--accent); }
-button.active { background: var(--active); border-color: var(--accent); color: #fff; }
+button.active { background: var(--active); border-color: var(--accent); color: var(--text); }
 button.accent { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 button.accent:hover { background: var(--accent2); }
 button.danger { color: var(--err); }
@@ -110,7 +110,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 }
 .palItem svg { display: block; margin: 0 auto; }
 .palItem:hover { border-color: var(--border); background: var(--panel2); color: var(--text); }
-.palItem.active { border-color: var(--accent); background: var(--active); color: #fff; }
+.palItem.active { border-color: var(--accent); background: var(--active); color: var(--text); }
 .palItem .lbl { font-size: 10.5px; color: var(--dim); margin-top: 3px; }
 .palItem.active .lbl, .palItem:hover .lbl { color: var(--text); }
 
