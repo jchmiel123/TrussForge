@@ -6,6 +6,7 @@ import {
   createState, addNode, addMember, reset, serialize, deserialize,
   getNode, centroid, rebuildBraces,
   componentOf, extractSub, insertSub, mirrorSub, translateSub, fragmentBounds,
+  splitMember, mergeNodes, membersAt, getMember,
 } from '../engine/model.js';
 import { step, run, waveValue, targetLength, memberForce, FIXED_DT, CONTACT_R } from '../engine/sim.js';
 import { walker, hopper, bridge, merry } from '../engine/demos.js';
@@ -547,6 +548,81 @@ function measurePeriod(state, signal, seconds) {
     const frag = extractSub(s, s.nodes.map(n => n.id));
     const s3 = createState(); insertSub(s3, frag, 0, 0);
     checkTrue('T18h solid flag survives copy / paste', s3.members[0].solid === true);
+  }
+}
+
+// ---- T20: split a member / merge nodes -----------------------------------
+{
+  // a) split a 2 m beam at its middle: two 1 m beams + a welded hub
+  {
+    const s = createState();
+    const a = addNode(s, 0, 1, { pinned: true }), b = addNode(s, 2, 1, { pinned: true });
+    const m = addMember(s, a, b, 'beam');
+    const r = splitMember(s, m.id, 1.0, 1.3);   // off-axis point projects onto the beam
+    checkTrue('T20a split makes 3 nodes, 2 members', !!r && s.nodes.length === 3 && s.members.length === 2);
+    check('T20b hub sits on the beam', r.node.y, 1, 1e-12);
+    check('T20c halves have rest length 1 m', r.members[0].restLen + r.members[1].restLen, 2, 1e-12);
+    checkTrue('T20d hub is welded by default', r.node.locked === true);
+    checkTrue('T20e original member is gone', getMember(s, m.id) === null);
+  }
+  // b) a split beam stays STRAIGHT under load (weld), a hinged one folds
+  {
+    const straight = lock => {
+      const s = createState({ world: { drag: 1.5 } });
+      // four-bar linkage: a anchored, b hangs from anchor c on a 1 m link,
+      // a 2 kg load on the hub. Welded hub = a rigid 2 m bar (stays
+      // straight); hinged hub = the bar folds into a V at the hub.
+      const a = addNode(s, 0, 2, { pinned: true }), b = addNode(s, 2, 2);
+      const c = addNode(s, 2, 3, { pinned: true });
+      addMember(s, b, c, 'beam');
+      const m = addMember(s, a, b, 'beam');
+      const r = splitMember(s, m.id, 1, 2, { locked: lock });
+      const load = addNode(s, 1, 1.4, { mass: 2 });
+      addMember(s, r.node, load, 'beam');
+      reset(s);
+      run(s, Math.round(4 / dt));
+      const A = getNode(s, a.id), H = r.node, B = getNode(s, b.id);
+      const v1 = [A.x - H.x, A.y - H.y], v2 = [B.x - H.x, B.y - H.y];
+      const ang = Math.atan2(v1[0] * v2[1] - v1[1] * v2[0], v1[0] * v2[0] + v1[1] * v2[1]);
+      return Math.abs(ang) * 180 / Math.PI;
+    };
+    check('T20f welded hub keeps the beam straight (180 deg)', straight(true), 180, 1.0);
+    checkTrue('T20g unwelded hub folds under the load', straight(false) < 170, `angle=${fmt(straight(false))}`);
+  }
+  // c) split keeps kind / props; splitting near an end is refused
+  {
+    const s = createState();
+    const a = addNode(s, 0, 1, { pinned: true }), b = addNode(s, 1, 1);
+    const sp = addMember(s, a, b, 'spring', { k: 123, c: 4, solid: true });
+    const r = splitMember(s, sp.id, 0.5, 1);
+    checkTrue('T20h split spring halves keep k, c, solid',
+      r.members.every(m => m.kind === 'spring' && m.k === 123 && m.c === 4 && m.solid === true));
+    checkTrue('T20i split refused within 5 % of an endpoint', splitMember(s, r.members[0].id, 0.01, 1) === null);
+  }
+  // d) merge: two squares touching at a corner -> one welded joint, no dupes
+  {
+    const s = createState();
+    const sq = (x0) => {
+      const p = [addNode(s, x0, 0), addNode(s, x0 + 1, 0), addNode(s, x0 + 1, 1), addNode(s, x0, 1)];
+      for (let i = 0; i < 4; i++) addMember(s, p[i], p[(i + 1) % 4], 'beam');
+      return p;
+    };
+    const A = sq(0), B = sq(1);                  // A[1] (1,0) coincides with B[0] (1,0)
+    // a link between the two coincident nodes (addMember refuses zero
+    // length, so push it by hand): merging must drop it as a self-link
+    s.members.push({ id: s.nextId++, a: A[1].id, b: B[0].id, kind: 'beam', solid: false, restLen: 0.5, k: 60, c: 1.5, wave: null });
+    const before = s.members.length;
+    const keep = mergeNodes(s, A[1].id, B[0].id);
+    checkTrue('T20j merge removes the dropped node', s.nodes.length === 7 && getNode(s, B[0].id) === null);
+    checkTrue('T20k members re-pointed, self-link dropped', s.members.length === before - 1 &&
+      s.members.every(m => m.a !== m.b) && membersAt(s, keep.id).length === 4);
+    checkTrue('T20l merged joint is welded and masses add', keep.locked === true && keep.mass === 2);
+    // duplicate edge: merging two nodes that both connect to the same third node
+    const s2 = createState();
+    const c = addNode(s2, 0, 0), d1 = addNode(s2, 1, 0), d2 = addNode(s2, 1, 0.01);
+    addMember(s2, c, d1, 'beam'); addMember(s2, c, d2, 'beam');
+    mergeNodes(s2, d1.id, d2.id);
+    checkTrue('T20m merge collapses duplicate edges', s2.members.length === 1 && s2.nodes.length === 2);
   }
 }
 

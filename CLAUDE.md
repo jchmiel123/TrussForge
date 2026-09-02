@@ -33,6 +33,9 @@ Everything in-house and dependency-free.
   Substructures: `componentOf`, `extractSub` / `insertSub` (fragment =
   rest pose + verbatim members), `mirrorSub`, `translateSub` - all
   headless, tested in T16 (mirrored walker walks backwards).
+  Editing: `splitMember` (welded hub into a member, t in 5..95 %) and
+  `mergeNodes` (drop into keep, self-links + duplicate edges removed,
+  masses add, joint welded) - T20.
 - `engine/sim.js` - `step(state, dt)` at FIXED_DT = 1/240:
   spring forces (soft, force-based - that is what makes the SHM
   frequency test exact) -> verlet integrate with gravity/drag ->
@@ -99,9 +102,16 @@ Everything in-house and dependency-free.
     gray->red / gray->blue; fRef = total unpinned mass * g (floor 5 N),
     recomputed per draw. Member panel `#pv_force` is refreshed by
     `updateForceReadout()` each frame.
-- `web/index.html` / `web/style.css` - CircuitForge tokens (--bg #0d131a,
-  --accent #2f81f7 family). Toolbar groups get `flex-shrink: 0` on
-  mobile so rows wrap whole groups.
+- `web/index.html` / `web/style.css` - ForgeKit theme tokens (see
+  `web/vendor/forgekit/theme.js`; NEVER hard-code a color in style.css,
+  use --bg/--panel/--panel2/--border/--line/--text/--dim/--icon/--accent/
+  --accent2/--active/--track/--ok/--err/--warn/--shadow/--overlay/--card)
+  and the renderer reads `theme.canvas.*`. Toolbar groups get
+  `flex-shrink: 0` on mobile so rows wrap whole groups.
+- `web/vendor/forgekit/` - VENDORED copy of D:\CodeLab\ForgeKit
+  (`python tools/sync-forgekit.py`). Edit the kit, not the copy.
+  ValuePod (`pod`) targets come from `podTargets()`; keys match the
+  panel slider ids so `refreshSliders()` keeps both in step.
 
 ## Hosting (VULCAN)
 

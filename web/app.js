@@ -7,7 +7,10 @@ import {
   getNode, getMember, findMember, membersAt, rebuildBraces, reset,
   serialize, deserialize, centroid, DEFAULTS,
   componentOf, extractSub, insertSub, mirrorSub, fragmentBounds,
+  splitMember, mergeNodes,
 } from '../engine/model.js';
+import { applyTheme, THEMES, themeNames } from './vendor/forgekit/theme.js';
+import { ValuePod } from './vendor/forgekit/pod.js';
 import { step, memberForce, FIXED_DT, WAVE_TYPES } from '../engine/sim.js';
 import { DEMOS, DEMO_HINTS } from '../engine/demos.js';
 import { snapToLattice, forEachLatticePoint, rowHeight, rowOffset, PITCHES } from '../engine/lattice.js';
@@ -16,7 +19,7 @@ import { snapToLattice, forEachLatticePoint, rowHeight, rowOffset, PITCHES } fro
 // CONFIG / VERSION
 // ============================================================
 
-const APP_VERSION = '0.9.0';
+const APP_VERSION = '0.10.0';
 const BUILD_DATE = '2026-09-02';
 const PREFS_KEY = 'trussforge.prefs';
 const NODE_R = 0.055;         // node draw radius, meters
@@ -44,10 +47,15 @@ let strainOn = false;         // force view: color members by axial force
 
 // Grid / view preferences: per device (localStorage), NOT part of the
 // build file - open any save and change the lattice to suit it.
-const PREF_DEFAULTS = { gridType: 'square', pitch: 0.25, gridStyle: 'dots', gridBright: 0.5, gridSize: 2 };
+const PREF_DEFAULTS = { theme: 'forge', gridType: 'square', pitch: 0.25, gridStyle: 'dots', gridBright: 0.5, gridSize: 2 };
 let prefs = { ...PREF_DEFAULTS };
 try { prefs = { ...PREF_DEFAULTS, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; } catch (e) { /* defaults */ }
 if (!PITCHES.includes(prefs.pitch)) prefs.pitch = PREF_DEFAULTS.pitch;
+if (!THEMES[prefs.theme]) prefs.theme = 'forge';
+// ForgeKit theme: CSS tokens for the chrome + a canvas palette for the board
+let theme = applyTheme(prefs.theme);
+const hexRgb = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+const withAlpha = (h, a) => `rgba(${hexRgb(h).join(',')},${a})`;
 function savePrefs() {
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) { /* ignore */ }
 }
@@ -142,7 +150,7 @@ function forceRef() {
 function strainStyle(f) {
   const t = Math.max(-1, Math.min(1, f / fRef));
   const a = Math.pow(Math.abs(t), 0.7);
-  const [r0, g0, b0] = [139, 156, 182];
+  const [r0, g0, b0] = hexRgb(theme.canvas.beam);
   const [r1, g1, b1] = t > 0 ? [255, 86, 72] : [64, 160, 255];
   const color = `rgb(${Math.round(r0 + (r1 - r0) * a)},${Math.round(g0 + (g1 - g0) * a)},${Math.round(b0 + (b1 - b0) * a)})`;
   return { color, a };
@@ -154,7 +162,7 @@ const fmtForce = f => {
 
 function draw() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = '#0d131a';
+  ctx.fillStyle = theme.canvas.board;
   ctx.fillRect(0, 0, vw, vh);
   if (strainOn) fRef = forceRef();
 
@@ -174,7 +182,7 @@ function drawGrid() {
   if (px < 7) return;                       // too dense to mean anything
   const alpha = 0.1 + 0.8 * prefs.gridBright;
   const fade = Math.min(1, (px - 7) / 12);  // ease in as you zoom in
-  const col = `rgba(125, 155, 195, ${(alpha * fade).toFixed(3)})`;
+  const col = `rgba(${theme.canvas.grid}, ${(alpha * fade).toFixed(3)})`;
   const s = prefs.gridSize;
   const x0 = wx(-px), x1 = wx(vw + px), y0 = wy(vh + px), y1 = wy(-px);
   if (prefs.gridStyle === 'lines') {
@@ -222,13 +230,13 @@ function drawGrid() {
 function drawGround() {
   const gy = sy(state.world.groundY);
   if (gy > vh + 40 || gy < -40) return;
-  ctx.fillStyle = 'rgba(20, 28, 38, .55)';
+  ctx.fillStyle = theme.canvas.ground;
   ctx.fillRect(0, gy, vw, vh - gy);
-  ctx.strokeStyle = '#3a4c63';
+  ctx.strokeStyle = theme.canvas.groundLine;
   ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(vw, gy); ctx.stroke();
   // hatching
-  ctx.strokeStyle = '#26344660';
+  ctx.strokeStyle = theme.canvas.hatch;
   ctx.lineWidth = 1.5;
   const hs = 14;
   ctx.beginPath();
@@ -255,21 +263,21 @@ function drawMember(m) {
     w *= 1 + 0.5 * st.a;             // loaded members also get thicker
   }
   if (seld) {
-    ctx.strokeStyle = 'rgba(47, 129, 247, .45)';
+    ctx.strokeStyle = `rgba(${theme.canvas.select}, .45)`;
     ctx.lineWidth = w + 7;
     ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
   }
   if (m.solid) {
     // solid = things collide with it: a pale hard edge around the member
-    ctx.strokeStyle = 'rgba(232, 240, 250, .55)';
+    ctx.strokeStyle = theme.canvas.solidEdge;
     ctx.lineWidth = w + 4;
     ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
   }
   ctx.lineCap = 'round';
   if (m.kind === 'beam') {
-    ctx.strokeStyle = col || '#8b9cb6';
+    ctx.strokeStyle = col || theme.canvas.beam;
     ctx.lineWidth = w;
     ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
   } else if (m.kind === 'spring') {
@@ -293,7 +301,7 @@ function drawSpring(x1, y1, x2, y2, m, col) {
   const amp = Math.max(2.5, 0.038 * cam.zoom);
   const lead = Math.min(len * 0.12, Math.max(4, 0.07 * cam.zoom));
   const span = len - 2 * lead;
-  const color = col || '#58a6ff';
+  const color = col || theme.canvas.spring;
   // faint core
   ctx.strokeStyle = color;
   ctx.globalAlpha = 0.28;
@@ -321,7 +329,7 @@ function drawActuator(x1, y1, x2, y2, a, b, m, w, col) {
   const ext = (curLen - m.restLen) / (m.restLen || 1);   // -amp..+amp
   // base rod (takes the force color in force view; the core keeps its
   // extension glow so you still see what the muscle is doing)
-  ctx.strokeStyle = col || '#55637a';
+  ctx.strokeStyle = col || theme.canvas.actuatorBase;
   ctx.lineWidth = w;
   ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
   // glowing core: brightness follows extension
@@ -337,7 +345,7 @@ function drawActuator(x1, y1, x2, y2, a, b, m, w, col) {
   ctx.save();
   ctx.translate(mx, my); ctx.rotate(ang);
   ctx.fillStyle = `rgb(${r},${gr},${bl})`;
-  ctx.strokeStyle = '#0d131a';
+  ctx.strokeStyle = theme.canvas.board;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.roundRect(-bs * 0.9, -bs * 0.55, bs * 1.8, bs * 1.1, 2);
@@ -352,15 +360,15 @@ function drawNode(n) {
   const gs = groupSet();
   const seld = (sel.kind === 'node' && sel.id === n.id) || (gs && gs.has(n.id));
   if (seld) {
-    ctx.fillStyle = 'rgba(47, 129, 247, .35)';
+    ctx.fillStyle = `rgba(${theme.canvas.select}, .35)`;
     ctx.beginPath(); ctx.arc(x, y, r + 7, 0, 7); ctx.fill();
   }
   if (n.pinned && !running) {
     // anchored: a small support triangle + ground line under the node
     // (structural-diagram style). Only while paused - while running the
     // gold node is enough and the symbol just clutters the motion.
-    ctx.strokeStyle = '#e3b341';
-    ctx.fillStyle = 'rgba(227, 179, 65, .18)';
+    ctx.strokeStyle = theme.canvas.anchor;
+    ctx.fillStyle = withAlpha(theme.canvas.anchor, 0.18);
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(x, y + r * 0.6);
@@ -372,8 +380,8 @@ function drawNode(n) {
     ctx.moveTo(x - r - 5, y + r + 9); ctx.lineTo(x + r + 5, y + r + 9);
     ctx.stroke();
   }
-  ctx.fillStyle = n.pinned ? '#e3b341' : '#d3dce6';
-  ctx.strokeStyle = '#0d131a';
+  ctx.fillStyle = n.pinned ? theme.canvas.anchor : theme.canvas.node;
+  ctx.strokeStyle = theme.canvas.nodeStroke;
   ctx.lineWidth = 2;
   if (n.locked) {
     // square = welded joint (angles held); round = hinge
@@ -390,9 +398,9 @@ function drawGesture() {
   if (gesture.type === 'marquee') {
     const x = Math.min(gesture.x0, gesture.x1), y = Math.min(gesture.y0, gesture.y1);
     const w = Math.abs(gesture.x1 - gesture.x0), h = Math.abs(gesture.y1 - gesture.y0);
-    ctx.fillStyle = 'rgba(47, 129, 247, .10)';
+    ctx.fillStyle = `rgba(${theme.canvas.select}, .10)`;
     ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = 'rgba(88, 166, 255, .8)';
+    ctx.strokeStyle = `rgba(${theme.canvas.select}, .8)`;
     ctx.lineWidth = 1.5;
     ctx.setLineDash([6, 4]);
     ctx.strokeRect(x, y, w, h);
@@ -402,7 +410,7 @@ function drawGesture() {
   if (gesture.type !== 'member') return;
   const a = getNode(state, gesture.from);
   if (!a) return;
-  ctx.strokeStyle = '#2f81f7';
+  ctx.strokeStyle = `rgb(${theme.canvas.select})`;
   ctx.lineWidth = 2.5;
   ctx.setLineDash([7, 6]);
   ctx.beginPath();
@@ -411,7 +419,7 @@ function drawGesture() {
   ctx.stroke();
   ctx.setLineDash([]);
   const p = snapPointForGesture();
-  ctx.strokeStyle = 'rgba(88, 166, 255, .7)';
+  ctx.strokeStyle = `rgba(${theme.canvas.select}, .7)`;
   ctx.beginPath(); ctx.arc(sx(p.x), sy(p.y), 7, 0, 7); ctx.stroke();
 }
 
@@ -425,9 +433,10 @@ function snapPointForGesture() {
 // HIT TESTING
 // ============================================================
 
-function hitNode(px, py) {
+function hitNode(px, py, exceptId) {
   let best = null, bestD = HIT_NODE_PX;
   for (const n of state.nodes) {
+    if (n.id === exceptId) continue;
     const d = Math.hypot(sx(n.x) - px, sy(n.y) - py);
     if (d < bestD) { bestD = d; best = n; }
   }
@@ -549,6 +558,10 @@ canvas.addEventListener('pointerdown', ev => {
   } else if (tool === 'select' && n) {
     if (!running) pushUndo();             // a drag is about to move the build pose
     gesture = { type: 'dragNode', id: n.id, moved: false };
+  } else if (tool === 'weld' && n) {
+    // tap = toggle weld; drag onto another node = merge the two
+    pushUndo();
+    gesture = { type: 'dragNode', id: n.id, moved: false, weld: true };
   } else if ((tool === 'beam' || tool === 'spring' || tool === 'actuator') && n) {
     gesture = { type: 'member', from: n.id, sx: p.sx, sy: p.sy };
   } else {
@@ -623,7 +636,10 @@ function endPointer(ev) {
   if (g && g.type === 'member') {
     finishMember(g, p);
   } else if (g && g.type === 'dragNode') {
-    if (g.moved) bakeNode(g.id);
+    if (g.moved && g.weld) {
+      const to = hitNode(p.sx, p.sy, g.id);
+      if (to) mergeInto(to.id, g.id); else bakeNode(g.id);
+    } else if (g.moved) bakeNode(g.id);
     else if (g.addToGroup) toggleInGroup(g.id);
     else tapAt(p.sx, p.sy);
   } else if (g && g.type === 'dragGroup') {
@@ -667,9 +683,15 @@ function tapAt(px, py) {
     else if (m) { pushUndo(); removeMember(state, m.id); select(null); markDirty(); }
     return;
   }
+  if (tool === 'weld') {
+    if (n) { select('node', n.id); toggleWeld(); return; }
+    if (m) { insertHub(m, px, py); return; }
+    select(null);
+    return;
+  }
   if (tool === 'node') {
     if (n) { select('node', n.id); return; }
-    if (m) { select('member', m.id); return; }
+    if (m) { insertHub(m, px, py); return; }
     pushUndo();
     const t = snapPt(wx(px), wy(py));
     const nn = addNode(state, t.x, t.y);   // born at rest where placed
@@ -705,6 +727,29 @@ function finishMember(g, p) {
     select('member', m.id);
   }
   markDirty();
+}
+
+// Put a welded hub INTO a member at the tapped spot (splits it in two).
+function insertHub(m, px, py) {
+  const t = snapPt(wx(px), wy(py));
+  pushUndo();
+  const r = splitMember(state, m.id, t.x, t.y);
+  if (!r) { undoStack.pop(); syncUndoButtons(); setStatus('Tap nearer the middle of the member to add a hub.', true); return; }
+  if (running) rebuildBraces(state, true);
+  markDirty();
+  select('node', r.node.id);
+  setStatus('Added a welded hub: the member stays straight. Unweld it (Weld tool or panel) for a hinge.');
+}
+
+// Merge node dropId into keepId (weld tool drag-and-drop).
+function mergeInto(keepId, dropId) {
+  const keep = mergeNodes(state, keepId, dropId);
+  if (!keep) return;
+  if (running) rebuildBraces(state, true);
+  else { keep.rx = keep.x; keep.ry = keep.y; rebuildBraces(state); }
+  markDirty();
+  select('node', keep.id);
+  setStatus(`Welded together: one joint, ${membersAt(state, keep.id).length} members.`);
 }
 
 // group selection helpers
@@ -763,6 +808,7 @@ function bakeNode(id) {
 const TOOL_HINTS = {
   select: 'Drag a node to move it. Tap anything to see its settings.',
   group: 'Drag a box around nodes to group them. Tap a node to add or remove it. Drag a grouped node to move the group.',
+  weld: 'Tap a node to weld / unweld it. Tap a beam to put a welded hub in it. Drag a node onto another node to merge them.',
   node: 'Tap empty space to place a node.',
   beam: 'Drag from a node to another node (or to empty space) to add a rigid beam.',
   spring: 'Drag from a node to add a stretchy spring.',
@@ -971,11 +1017,13 @@ const LEGEND_HTML = `
   <p><b>Anchor</b> - fixes a node to the world.</p>
   <p><b>Solid</b> (member panel) - a member other bodies land on and slide along. Pass-through by default. Anchored solid beams = ramps and platforms.</p>
   <p><b>Weld</b> - members meeting at a node keep their angles (rigid joint).</p>
-  <p><b>Grid</b> button: square or triangle lattice, pitch, brightness (<kbd>[</kbd> <kbd>]</kbd> change pitch). Per device, not saved with builds.</p>
+  <p><b>View</b> button: theme (dark / soft / light paper), square or triangle lattice, pitch, brightness (<kbd>[</kbd> <kbd>]</kbd> change pitch). Per device, not saved with builds.</p>
+  <p><b>Weld</b> tool (<kbd>W</kbd>): tap a node to weld it, tap a beam to add a welded hub, drag a node onto another to merge.</p>
+  <p><b>Dial</b>: the card over the board turns the selected thing's numbers. Chips pick which one; <b>=</b> opens the full sheet.</p>
   <p><b>Group</b> tool: box-select nodes, then copy / paste / mirror / move them. "Select body" on a node or member grabs the whole creature.</p>
   <p><b>Force view</b> (<kbd>F</kbd>) colors members: <span style="color:#ff5648">red = tension</span>, <span style="color:#40a0ff">blue = compression</span>. Full color = carrying the whole build's weight.</p>
   <p class="keys"><kbd>Space</kbd> run <kbd>R</kbd> reset <kbd>G</kbd> snap <kbd>Ctrl+Z</kbd> undo<br>
-  <kbd>V</kbd> <kbd>M</kbd> <kbd>N</kbd> <kbd>B</kbd> <kbd>S</kbd> <kbd>A</kbd> <kbd>E</kbd> tools <kbd>Del</kbd> delete<br>
+  <kbd>V</kbd> <kbd>M</kbd> <kbd>W</kbd> <kbd>N</kbd> <kbd>B</kbd> <kbd>S</kbd> <kbd>A</kbd> <kbd>E</kbd> tools <kbd>Del</kbd> delete<br>
   <kbd>Ctrl+C</kbd> copy <kbd>Ctrl+V</kbd> paste <kbd>Ctrl+D</kbd> duplicate <kbd>Ctrl+A</kbd> all</p>
 </div>`;
 
@@ -1008,6 +1056,7 @@ const TIPS = {
   mirror: 'Flip the group left-right about its centre. A mirrored walker walks the other way.',
   spread: 'Give the muscles evenly spaced phases from left to right - the quickest way to a gait.',
   force: 'Axial force through this member right now. Tension pulls its ends together, compression pushes them apart. Toggle the force view (F) to see the whole build.',
+  theme: 'Forge and Slate are dark; Paper is light for phones in daylight. Per device.',
   gtype: 'square = classic. triangles = every cell is an equilateral triangle: trusses, domes and hex frames snap exactly.',
   gpitch: 'Distance between grid points, meters. Smaller = finer detail.',
   gstyle: 'Dots or full lines.',
@@ -1018,15 +1067,104 @@ const TIPS = {
   speed: 'Simulation speed. 0.25x for slow motion.',
 };
 
+// ---- value pod: dial + chips floating over the board (ForgeKit) --------
+// Shows the numeric properties of the selection in the editing window.
+// On phones the member / node sheet no longer opens by itself: turn the
+// dial, or press "=" for the full sheet.
+const pod = new ValuePod($('boardWrap'), {
+  onStart: () => pushUndo(),
+  onChange: () => { refreshSliders(); markDirty(); if (!running) draw(); else positionPill(); },
+  onMore: () => { openSheet(true); },
+});
+
+function podTargets() {
+  const n = selectedNode(), m = selectedMember();
+  if (n) {
+    return { title: 'Node', targets: [
+      { key: 'mass', label: 'mass', unit: 'kg', min: 0.2, max: 5, step: 0.1, get: () => n.mass, set: v => { n.mass = v; } },
+    ] };
+  }
+  if (m) {
+    const T = [];
+    const lenMax = Math.max(4, Math.ceil(m.restLen * 1.6 * 20) / 20);
+    if (m.kind !== 'actuator') {
+      T.push({ key: 'restLen', label: 'rest', unit: 'm', min: 0.1, max: lenMax, step: 0.05, get: () => m.restLen, set: v => { m.restLen = v; rebuildBraces(state, running); } });
+    }
+    if (m.kind === 'spring') {
+      T.push({ key: 'k', label: 'stiffness', unit: 'N/m', min: 1, max: 400, step: 1, get: () => m.k, set: v => { m.k = v; } });
+      T.push({ key: 'c', label: 'damping', min: 0, max: 10, step: 0.1, get: () => m.c, set: v => { m.c = v; } });
+    }
+    if (m.kind === 'actuator') {
+      T.push({ key: 'lo', label: 'short', unit: 'm', min: 0.05, max: lenMax, step: 0.01, get: () => m.restLen * (1 - m.wave.amp), set: v => setActuatorLengths(m, v, null) });
+      T.push({ key: 'hi', label: 'long', unit: 'm', min: 0.05, max: lenMax, step: 0.01, get: () => m.restLen * (1 + m.wave.amp), set: v => setActuatorLengths(m, null, v) });
+      T.push({ key: 'period', label: 'period', unit: 's', min: 0.2, max: 4, step: 0.05, get: () => m.wave.period, set: v => { m.wave.period = v; } });
+      T.push({ key: 'phase', label: 'phase', min: 0, max: 1, step: 1 / 24, fmt: fmtPhase, get: () => m.wave.phase, set: v => { m.wave.phase = v; } });
+      if (m.wave.type === 'smooth' || m.wave.type === 'square') {
+        T.push({ key: 'duty', label: 'long time', min: 0.05, max: 0.95, step: 0.05, get: () => m.wave.duty, set: v => { m.wave.duty = v; } });
+      }
+    }
+    return { title: { beam: 'Beam', spring: 'Spring', actuator: 'Actuator' }[m.kind], targets: T };
+  }
+  if (sel.kind === 'group') {
+    const gs = groupSet();
+    const acts = state.members.filter(x => gs.has(x.a) && gs.has(x.b) && x.kind === 'actuator');
+    if (!acts.length) return { title: `Group: ${sel.ids.length} nodes`, targets: [] };
+    return { title: `Group: ${acts.length} muscle${acts.length === 1 ? '' : 's'}`, targets: [
+      { key: 'gperiod', label: 'period (all)', unit: 's', min: 0.2, max: 4, step: 0.05, get: () => acts[0].wave.period, set: v => { for (const a of acts) a.wave.period = v; } },
+      { key: 'gamp', label: 'amplitude (all)', min: 0, max: 0.45, step: 0.01, get: () => acts[0].wave.amp, set: v => { for (const a of acts) a.wave.amp = v; } },
+    ] };
+  }
+  if (sel.kind === 'world') {
+    const W = state.world;
+    return { title: 'World', targets: [
+      { key: 'gravity', label: 'gravity', unit: 'm/s2', min: 0, max: 25, step: 0.1, get: () => W.gravity, set: v => { W.gravity = v; } },
+      { key: 'friction', label: 'grip', min: 0, max: 2, step: 0.01, get: () => W.friction, set: v => { W.friction = v; } },
+      { key: 'drag', label: 'air drag', min: 0, max: 2, step: 0.01, get: () => W.drag, set: v => { W.drag = v; } },
+    ] };
+  }
+  if (sel.kind === 'grid') {
+    return { title: 'View', targets: [
+      { key: 'gbright', label: 'grid brightness', min: 0, max: 1, step: 0.05, get: () => prefs.gridBright, set: v => { prefs.gridBright = v; savePrefs(); } },
+      { key: 'gsize', label: 'grid size', unit: 'px', min: 1, max: 4, step: 0.5, get: () => prefs.gridSize, set: v => { prefs.gridSize = v; savePrefs(); } },
+    ] };
+  }
+  return null;
+}
+
+function syncPod() {
+  const pt = podTargets();
+  if (!pt) { pod.hide(); return; }
+  pod.show(pt.targets, { title: pt.title, active: pod.active && pod.active.key });
+}
+
+// after a dial turn, keep the side panel's sliders in step
+function refreshSliders() {
+  for (const t of pod.targets) {
+    const el = $('pp_' + t.key);
+    if (!el) continue;
+    const v = t.get();
+    el.value = v;
+    const pv = $('pv_' + t.key);
+    if (pv) pv.textContent = t.key === 'phase' ? fmtPhase(v) : fmtVal(v) + ' ' + (pv.dataset.unit || '');
+  }
+  if (sel.kind === 'node') positionPill();
+}
+
 function renderProps() {
+  renderPropsInner();
+  syncPod();
+}
+
+function renderPropsInner() {
   $('worldBtn').classList.toggle('active', sel.kind === 'world');
   const n = selectedNode(), m = selectedMember();
   $('gridBtn').classList.toggle('active', sel.kind === 'grid');
   if (sel.kind === 'world') { renderWorldProps(); openSheet(true); return; }
   if (sel.kind === 'grid') { renderGridProps(); openSheet(true); return; }
-  if (n) { renderNodeProps(n); openSheet(!narrow.matches); return; }   // phone: the pill is enough
-  if (sel.kind === 'group') { renderGroupProps(); openSheet(true); return; }
-  if (m) { renderMemberProps(m); openSheet(true); return; }
+  // phone: node / member / group selections show the pod; "=" opens the sheet
+  if (n) { renderNodeProps(n); openSheet(false); return; }
+  if (sel.kind === 'group') { renderGroupProps(); openSheet(false); return; }
+  if (m) { renderMemberProps(m); openSheet(false); return; }
   propsBody.innerHTML = LEGEND_HTML;
   openSheet(false);
 }
@@ -1088,21 +1226,8 @@ function renderMemberProps(m) {
   }
   if (m.kind === 'actuator') {
     wireSel('wtype', v => { m.wave.type = v; renderProps(); });
-    // short / long lengths map onto restLen (mid) + amp (half-swing / mid)
-    const setLoHi = (lo, hi) => {
-      let L = lo ?? m.restLen * (1 - m.wave.amp), H = hi ?? m.restLen * (1 + m.wave.amp);
-      if (lo != null && L > H - 0.02) H = L + 0.02;
-      if (hi != null && H < L + 0.02) L = H - 0.02;
-      L = Math.max(0.03, L); H = Math.max(L + 0.02, H);
-      m.restLen = (L + H) / 2;
-      m.wave.amp = (H - L) / (H + L);
-      rebuildBraces(state, running);
-      // keep the other slider honest when one pushes it
-      const other = lo != null ? ['hi', H] : ['lo', L];
-      const el = $('pp_' + other[0]); if (el) { el.value = other[1]; $('pv_' + other[0]).textContent = fmtVal(other[1]) + ' m'; }
-    };
-    wireProp('lo', v => setLoHi(v, null));
-    wireProp('hi', v => setLoHi(null, v));
+    wireProp('lo', v => { setActuatorLengths(m, v, null); refreshSliders(); });
+    wireProp('hi', v => { setActuatorLengths(m, null, v); refreshSliders(); });
     wireProp('period', v => { m.wave.period = v; });
     wireProp('phase', v => { m.wave.phase = v; });
     if (m.wave.type === 'smooth' || m.wave.type === 'square') wireProp('duty', v => { m.wave.duty = v; });
@@ -1173,20 +1298,22 @@ function deleteGroup() {
 
 function renderGridProps() {
   propsBody.innerHTML = `
-    <div class="propTitle">Grid</div>
-    <p class="desc">Snap lattice for building. Lives on this device, not in the build file - open any save and change it to fit the design.</p>
+    <div class="propTitle">View</div>
+    <p class="desc">Theme and snap grid. Lives on this device, not in the build file - open any save and change it to fit the design.</p>
+    ${propSelect('theme', 'theme', themeNames(), prefs.theme, v => THEMES[v].label)}
     ${propSelect('gtype', 'lattice', ['square', 'tri'], prefs.gridType, v => ({ square: 'square', tri: 'triangles (equilateral)' })[v])}
     ${propSelect('gpitch', 'pitch', PITCHES.map(String), String(prefs.pitch), v => v + ' m')}
     ${propSelect('gstyle', 'style', ['dots', 'lines'], prefs.gridStyle)}
     ${propSlider('gbright', 'brightness', 0, 1, 0.05, prefs.gridBright, '')}
     ${propSlider('gsize', 'dot / line size', 1, 4, 0.5, prefs.gridSize, 'px')}
     <div class="propBtns"><button id="gReset">Defaults</button></div>`;
+  wirePref('theme', v => { prefs.theme = v; theme = applyTheme(v); });
   wirePref('gtype', v => { prefs.gridType = v; });
   wirePref('gpitch', v => { prefs.pitch = parseFloat(v); });
   wirePref('gstyle', v => { prefs.gridStyle = v; });
   wirePref('gbright', v => { prefs.gridBright = parseFloat(v); });
   wirePref('gsize', v => { prefs.gridSize = parseFloat(v); });
-  $('gReset').addEventListener('click', () => { prefs = { ...PREF_DEFAULTS }; savePrefs(); renderProps(); if (!running) draw(); });
+  $('gReset').addEventListener('click', () => { prefs = { ...PREF_DEFAULTS }; savePrefs(); theme = applyTheme(prefs.theme); renderProps(); if (!running) draw(); });
 }
 // prefs are not part of the build: no undo entry, no autosave
 function wirePref(id, fn) {
@@ -1237,6 +1364,7 @@ function wireProp(id, fn) {
     const pv = $('pv_' + id);
     pv.textContent = id === 'phase' ? fmtPhase(v) : fmtVal(v) + ' ' + pv.dataset.unit;
     fn(v);
+    pod.refresh();
     markDirty();
     if (!running) draw();
   });
@@ -1253,6 +1381,17 @@ function fmtPhase(v) {
   const gcd = (a, b) => (b ? gcd(b, a % b) : a);
   const g = gcd(k, d); k /= g; d /= g;
   return `${k}/${d} (${Math.round(v * 360)} deg)`;
+}
+
+// short / long lengths map onto restLen (mid) + amp (half-swing / mid)
+function setActuatorLengths(m, lo, hi) {
+  let L = lo ?? m.restLen * (1 - m.wave.amp), H = hi ?? m.restLen * (1 + m.wave.amp);
+  if (lo != null && L > H - 0.02) H = L + 0.02;
+  if (hi != null && H < L + 0.02) L = H - 0.02;
+  L = Math.max(0.03, L); H = Math.max(L + 0.02, H);
+  m.restLen = (L + H) / 2;
+  m.wave.amp = (H - L) / (H + L);
+  rebuildBraces(state, running);
 }
 
 function changeKind(m, kind) {
@@ -1375,6 +1514,7 @@ window.addEventListener('keydown', ev => {
   else if (k === ']') stepPitch(1);
   else if (k === 'v') setTool('select');
   else if (k === 'm') setTool('group');
+  else if (k === 'w') setTool('weld');
   else if (k === 'n') setTool('node');
   else if (k === 'b') setTool('beam');
   else if (k === 's') setTool('spring');
@@ -1688,6 +1828,9 @@ window.TF = {
   selectBody,
   get clip() { return clip; },
   get prefs() { return prefs; },
+  get theme() { return theme; },
+  pod,
+  insertHub, mergeInto,
   set prefs(p) { prefs = { ...prefs, ...p }; savePrefs(); draw(); },
   snapPt,
   get strain() { return strainOn; },

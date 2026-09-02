@@ -179,6 +179,71 @@ export function centroid(state) {
   return k ? { x: x / k, y: y / k } : { x: 0, y: 0 };
 }
 
+// ---- editing helpers: split a member, merge two nodes ----------------------
+
+// Insert a node ON member m at the point of the segment nearest (x, y)
+// and replace m by two members of the same kind / props. The new node is
+// WELDED (locked) so a split beam stays one straight stick with a hub in
+// it - unweld it for a hinge. Returns the new node (null if the point
+// would land on an endpoint).
+export function splitMember(state, memberId, x, y, opts = {}) {
+  const m = getMember(state, memberId);
+  if (!m) return null;
+  const a = getNode(state, m.a), b = getNode(state, m.b);
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const l2 = dx * dx + dy * dy;
+  if (l2 < 1e-12) return null;
+  let t = ((x - a.x) * dx + (y - a.y) * dy) / l2;
+  if (opts.t !== undefined) t = opts.t;
+  if (t < 0.05 || t > 0.95) return null;
+  const n = addNode(state, a.x + t * dx, a.y + t * dy, {
+    locked: opts.locked !== undefined ? opts.locked : true,
+    mass: opts.mass,
+  });
+  // rest pose along the REST segment, so Reset keeps it on the beam
+  n.rx = a.rx + t * (b.rx - a.rx); n.ry = a.ry + t * (b.ry - a.ry);
+  const common = { k: m.k, c: m.c, solid: m.solid, wave: m.wave ? { ...m.wave } : undefined };
+  const i = state.members.findIndex(x => x.id === m.id);
+  state.members.splice(i, 1);
+  const m1 = addMember(state, a, n, m.kind, { ...common, restLen: m.restLen * t });
+  const m2 = addMember(state, n, b, m.kind, { ...common, restLen: m.restLen * (1 - t) });
+  rebuildBraces(state);
+  return { node: n, members: [m1, m2] };
+}
+
+// Merge node dropId INTO keepId: every member that touched drop now
+// touches keep; members that would connect keep to itself, or duplicate
+// an existing keep-x member, are removed. Masses add; anchor and weld
+// flags OR together; the merged joint is welded (that is the point of
+// welding two things together). Returns keep.
+export function mergeNodes(state, keepId, dropId) {
+  const keep = getNode(state, keepId), drop = getNode(state, dropId);
+  if (!keep || !drop || keep.id === drop.id) return keep || null;
+  const key = m => (m.a < m.b ? `${m.a}-${m.b}` : `${m.b}-${m.a}`);
+  const touched = m => m.a === drop.id || m.b === drop.id;
+  // edges that do not touch drop are untouched originals (no duplicates
+  // among them); only RE-POINTED edges get checked against that set
+  const seen = new Set(state.members.filter(m => !touched(m)).map(key));
+  state.members = state.members.filter(m => {
+    if (!touched(m)) return true;
+    if (m.a === drop.id) m.a = keep.id;
+    if (m.b === drop.id) m.b = keep.id;
+    if (m.a === m.b) return false;                 // collapsed onto itself
+    const k = key(m);
+    if (seen.has(k)) return false;                 // duplicate edge
+    seen.add(k);
+    return true;
+  });
+  keep.mass = keep.mass + drop.mass;
+  keep.pinned = keep.pinned || drop.pinned;
+  keep.locked = true;
+  if (keep.pinned) { keep.px = keep.x; keep.py = keep.y; }
+  const i = state.nodes.findIndex(n => n.id === drop.id);
+  if (i >= 0) state.nodes.splice(i, 1);
+  rebuildBraces(state);
+  return keep;
+}
+
 // ---- substructures (copy / paste / mirror) -------------------------------
 
 // Node ids reachable from nodeId through members (the connected "body").

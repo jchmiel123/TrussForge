@@ -4,12 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>TrussForge</title>
+<link rel="stylesheet" href="vendor/forgekit/forgekit.css">
+<link rel="stylesheet" href="vendor/forgekit/forgekit.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div id="app">
   <header id="toolbar">
-    <div class="brand">Truss<span>Forge</span><em id="ver">v0.9.0</em></div>
+    <div class="brand">Truss<span>Forge</span><em id="ver">v0.10.0</em></div>
     <input id="projName" class="projName" maxlength="64" spellcheck="false" autocomplete="off" title="Project name - click to rename. Save stores it on the server under this name." value="Untitled">
     <div class="group">
       <button id="runBtn" class="accent" title="Run / pause the simulation (Space)">Run</button>
@@ -40,7 +42,7 @@
         <svg viewBox="0 0 16 16" width="16" height="16"><path d="M3.5 8 H12.5 M3.5 8 L6 5.5 M3.5 8 L6 10.5 M12.5 8 L10 5.5 M12.5 8 L10 10.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
       <button id="worldBtn" title="World settings: gravity, friction, drag, sim speed (saved with the build)">World</button>
-      <button id="gridBtn" title="Grid: lattice type, pitch, brightness (this device, not saved with the build)">Grid</button>
+      <button id="gridBtn" title="View: theme, grid lattice, pitch, brightness (this device, not saved with the build)">View</button>
     </div>
     <div class="group right">
       <button id="saveBtn" class="accent2" title="Save to the server under the project name (Ctrl+S). Falls back to a file download if the server is unreachable.">Save</button>
@@ -66,7 +68,11 @@
         <svg viewBox="0 0 22 22" width="22" height="22"><rect x="3.5" y="3.5" width="15" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="3 2.2"/><circle cx="8.5" cy="8.5" r="1.8" fill="currentColor"/><circle cx="14" cy="13.5" r="1.8" fill="currentColor"/></svg>
         <div class="lbl">Group</div>
       </div>
-      <div class="palItem" data-tool="node" title="Place nodes (N)">
+      <div class="palItem" data-tool="weld" title="Weld: tap a node to weld / unweld it, tap a beam to put a welded hub in it, drag a node onto another to merge them (W)">
+        <svg viewBox="0 0 22 22" width="22" height="22"><path d="M3 11 H19" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><rect x="7.5" y="7.5" width="7" height="7" rx="1.5" fill="currentColor"/><path d="M11 3 V7 M11 15 V19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <div class="lbl">Weld</div>
+      </div>
+      <div class="palItem" data-tool="node" title="Place nodes (N). Tap on a beam to put a welded hub in it.">
         <svg viewBox="0 0 22 22" width="22" height="22"><circle cx="11" cy="11" r="4" fill="currentColor"/></svg>
         <div class="lbl">Node</div>
       </div>

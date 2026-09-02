@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.10.0 - 2026-09-02
+
+ForgeKit: themes + dial pod. Weld tool with hubs and merging.
+
+- **ForgeKit** (new shared kit, D:\CodeLab\ForgeKit, vendored under
+  `web/vendor/forgekit/` by `tools/sync-forgekit.py`): theme tokens and
+  canvas palettes (Forge dark, Slate soft dark, Paper light), the Dial
+  (270-degree bounded rotary control with step snapping) and the
+  ValuePod (chips + dial + nudge + "=" card).
+- Themes: View panel (was Grid) gets a theme select. Every stylesheet
+  color is a token now; the board palette follows the theme.
+- Value pod floats over the board for whatever is selected: node mass;
+  member rest / stiffness / damping or short / long / period / phase /
+  long-time; group period + amplitude; world gravity / grip / drag; view
+  grid brightness / size. Phase snaps to 1/24. Turning the dial and the
+  panel sliders stay in step; one undo entry per turn. On phones the
+  sheet no longer opens by itself for nodes / members / groups - the pod
+  does the quick edits and "=" opens the sheet.
+- **Weld tool** (W): tap a node to weld / unweld; tap a beam (Node tool
+  too) to insert a welded HUB - the member splits into two halves that
+  stay straight, so a beam can carry a joint in its middle; drag a node
+  onto another to MERGE them into one welded joint (members re-pointed,
+  duplicates dropped, masses add). Engine: `splitMember`, `mergeNodes`,
+  tests T20a-m (a welded hub holds 180 degrees under load, an unwelded
+  one folds; merge collapses self-links and duplicate edges).
+- 103/103 engine tests.
+
 ## 0.9.0 - 2026-09-02
 
 Project name, save to server, new waveforms, start / stop lengths.

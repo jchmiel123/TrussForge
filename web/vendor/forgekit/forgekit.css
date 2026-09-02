@@ -1,0 +1,39 @@
+/* ForgeKit widget styles. Everything is driven by the theme tokens that
+   applyTheme() writes onto :root (--panel2, --border, --accent ...), so
+   a theme switch restyles these without touching this file. */
+
+/* ---- ValuePod: floating value card over the work area ---------------- */
+.fk-pod {
+  position: absolute; right: 10px; bottom: 10px; z-index: 30;
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--card, rgba(18, 26, 36, .94));
+  border: 1px solid var(--border, #243244); border-radius: 14px;
+  padding: 7px 8px 8px;
+  box-shadow: 0 6px 22px var(--shadow, rgba(0, 0, 0, .5));
+  max-width: min(320px, calc(100% - 20px));
+  user-select: none;
+}
+.fk-pod.fk-hidden { display: none; }
+.fk-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.fk-chip {
+  font: 11px "Segoe UI", system-ui, sans-serif; padding: 3px 9px; border-radius: 999px;
+  background: var(--panel2, #18222e); border: 1px solid var(--border, #243244);
+  color: var(--dim, #7c8ba1); cursor: pointer; white-space: nowrap;
+}
+.fk-chip:hover { border-color: var(--accent, #2f81f7); color: var(--text, #d3dce6); }
+.fk-chip.fk-on { background: var(--active, #1c3252); border-color: var(--accent, #2f81f7); color: var(--accent2, #58a6ff); }
+.fk-chip.fk-static { cursor: default; color: var(--text, #d3dce6); }
+.fk-body { display: flex; align-items: stretch; gap: 7px; }
+.fk-dial { display: block; border-radius: 12px; touch-action: none; outline: none; }
+.fk-dial:focus-visible { box-shadow: 0 0 0 2px var(--accent, #2f81f7); }
+.fk-col { display: flex; flex-direction: column; gap: 5px; }
+.fk-col button {
+  flex: 1; width: 38px; padding: 0; font: 700 15px "Segoe UI", system-ui, sans-serif;
+  background: var(--panel2, #18222e); color: var(--text, #d3dce6);
+  border: 1px solid var(--border, #243244); border-radius: 8px; cursor: pointer;
+}
+.fk-col button:hover { border-color: var(--accent, #2f81f7); }
+.fk-col .fk-more { font-size: 13px; letter-spacing: 1px; }
+@media (pointer: coarse) {
+  .fk-col button { width: 44px; }
+}

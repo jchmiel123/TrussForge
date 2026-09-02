@@ -46,9 +46,16 @@ load with the force view on.
 
 ## Controls
 
-- **Palette**: Select / Group / Node / Beam / Spring / Actuator / Erase.
+- **Palette**: Select / Group / Weld / Node / Beam / Spring / Actuator / Erase.
+- **Weld** tool: tap a node to weld or unweld it; tap a beam to insert a
+  welded hub (the beam stays one straight stick with a joint in it);
+  drag a node onto another node to merge them into one welded joint.
+  The Node tool also inserts a hub when you tap on a member.
+- **Value pod**: a floating card over the board with a dial for the
+  selected thing's numbers (chips switch which one). "=" opens the full
+  panel. Built on ForgeKit, the shared CodeLab web widget kit.
 - Tap empty space (Node tool) to place a node. Grid snap is on by
-  default; toggle it off for freeform placement. **Grid** button: square
+  default; toggle it off for freeform placement. **View** button: theme (Forge dark, Slate, Paper light), square
   or equilateral-triangle lattice, pitch (0.05-1 m), dots or lines,
   brightness. Grid settings live on the device, not in the build file,
   so you can open any save and change the lattice to suit it.
@@ -77,7 +84,7 @@ load with the force view on.
   and blue in compression, brighter and thicker the more of the build's
   weight they carry. The member panel shows a live "N tension /
   compression" readout.
-- Keys: Space run, R reset, G snap, [ ] grid pitch, F force view, V/M/N/B/S/A/E tools, Esc deselect,
+- Keys: Space run, R reset, G snap, [ ] grid pitch, F force view, V/M/W/N/B/S/A/E tools, Esc deselect,
   Del delete, Ctrl+Z/Ctrl+Y undo/redo, Ctrl+S/Ctrl+O.
 
 ## Physics notes
