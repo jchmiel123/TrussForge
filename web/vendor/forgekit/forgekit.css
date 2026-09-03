@@ -107,3 +107,15 @@
 @media (pointer: coarse) {
   .fk-lib-row button, .fk-modal-btns button { min-height: 40px; }
 }
+
+/* ---- Slider steppers (slider.js addSteppers) --------------------------- */
+.fk-slider-flex { display: flex; align-items: center; gap: 6px; }
+.fk-slider-flex input[type="range"] { flex: 1; width: auto; min-width: 0; }
+.fk-step-btn {
+  flex: 0 0 auto; width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--panel2, #18222e); color: var(--dim, #7c8ba1); border: 1px solid var(--border, #243244);
+  border-radius: 6px; cursor: pointer; touch-action: none;
+}
+.fk-step-btn svg { width: 8px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.fk-step-btn:hover { color: var(--accent, #2f81f7); border-color: var(--accent, #2f81f7); }
+@media (pointer: coarse) { .fk-step-btn { width: 36px; height: 36px; } }

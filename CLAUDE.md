@@ -65,7 +65,8 @@ Everything in-house and dependency-free.
   triangle / smooth (tanh of a duty-warped sine; `square` is legacy and
   loads as smooth). The UI edits SHORT / LONG lengths; the file keeps
   restLen + amp (lo = rest(1-amp), hi = rest(1+amp)).
-- `engine/demos.js` - walker + hopper + bridge + merry (+ `DEMO_HINTS`
+- `engine/demos.js` - walker + hopper + inchworm + bridge + catapult +
+  merry + chain (+ `DEMO_HINTS`
   for the UI: status text, forceView). Bridge = 4-bay Warren truss at
   y=1 (nothing touches the ground), LEFT end anchored, RIGHT end on a
   hanger link from an anchored pier = rocker bearing. Do not anchor both
@@ -171,8 +172,7 @@ Everything in-house and dependency-free.
 
 ## To do (Justin's asks, keep this list)
 
-- (Chains shipped in 0.12.0.) Left on the roadmap: catapult / inchworm
-  demos.
+- (Chains 0.12.0, catapult + inchworm 0.14.0 shipped.) Nothing queued.
 
 ## Conventions
 

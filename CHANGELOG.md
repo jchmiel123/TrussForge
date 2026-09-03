@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.14.0 - 2026-09-03
+
+Inchworm and Catapult demos; phone layout pass. 129/129 tests.
+
+- Inchworm demo: three walker cells sharing feet, contraction wave
+  lagging 0.2 cycle per segment (tuned by sweep). Crawls forward for
+  grip 0.4-1.2 without hopping (T24a-d).
+- Catapult demo: solid arm on an anchored welded pivot, 8 kg
+  counterweight, 0.3 kg ball resting on the arm, solid stop bar at 45
+  degrees. The ball leaves at 41 degrees, 2.5 m apex, ~2.9 m throw; the
+  arm ends on the stop (T23a-e). A heavier weight or steeper cock just
+  slides the ball off early - the sweep said so.
+- Phone layout: the toolbar was five rows (157 px) on a 375 px screen.
+  Now two: brand + name + Run/Reset, then the icon strip with a "..."
+  button that opens World / View / Save / Open / Demo / Clear as a
+  captioned card. The long version stamp moves to the status bar on
+  phones. Palette strip: most-used tools first, hidden scrollbar,
+  narrower items. Touch targets ~40 px (the Run button was 28 px).
+
 ## 0.13.0 - 2026-09-02
 
 Reference consumer of ForgeKit 0.4.0 (Wave 2). No engine change; 120/120

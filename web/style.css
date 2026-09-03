@@ -194,6 +194,13 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 #status.ok { color: var(--ok); }
 #status.err { color: var(--err); }
 
+/* "more" drawer: on desktop the wrapper is invisible (display: contents
+   keeps its groups as toolbar flex items); on phones the World/View and
+   file groups hide behind the ... button and open as a captioned card */
+#tbExtra { display: contents; }
+#tbMoreBtn { display: none; }
+#verMobile { display: none; font: 10px Consolas, monospace; color: var(--dim); margin-left: auto; white-space: nowrap; }
+
 /* --- mobile / touch --------------------------------------------------- */
 @media (pointer: coarse) {
   button { padding: 8px 13px; }
@@ -201,6 +208,10 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   #toolbar button { padding: 7px 10px; }
   #toolbar button.icon { padding: 8px 9px; }
   #nodePill button { padding: 8px 11px; }
+  /* 40 px-ish targets in the toolbar (the accent rule has its own padding) */
+  #toolbar button { padding: 9px 11px; }
+  #toolbar button.icon { padding: 9px 10px; }
+  #toolbar button.accent { padding: 9px 14px; }
   .propRow input[type="range"] { height: 22px; }
   .propRow input[type="range"]::-webkit-slider-thumb { width: 18px; height: 18px; margin-top: -7.5px; }
   .toggles button, .propBtns button { padding: 7px 0; }
@@ -223,7 +234,26 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
     border-right: none; border-top: 1px solid var(--line);
     padding: 5px 8px;
   }
-  .palItem { flex: 0 0 64px; touch-action: pan-x; }
+  .palItem { flex: 0 0 58px; touch-action: pan-x; }
+  #palette { scrollbar-width: none; }
+  #palette::-webkit-scrollbar { display: none; }
+  /* two toolbar rows: brand + name + run / reset, then the icon strip
+     with ... ; the long version stamp moves to the status bar */
+  .brand em { display: none; }
+  #verMobile { display: inline; }
+  #status { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #tbMoreBtn { display: inline-block; margin-left: auto; }
+  #tbExtra { display: none; }
+  #tbExtra.open {
+    display: flex; flex-wrap: wrap; width: 100%; gap: 6px 8px;
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; position: relative;
+  }
+  #tbExtra.open::before {
+    content: 'BUILD'; display: block; width: 100%;
+    font-size: 9px; letter-spacing: 1.5px; color: var(--dim);
+  }
+  #tbExtra.open .group.right { margin-left: 0; }
 
   #props {
     position: fixed; left: 0; right: 0; bottom: 0; width: auto;

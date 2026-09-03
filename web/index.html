@@ -40,6 +40,12 @@
       <button id="strainBtn" class="icon" title="Force view: red = tension, blue = compression (F)" aria-label="Force view">
         <svg viewBox="0 0 16 16" width="16" height="16"><path d="M3.5 8 H12.5 M3.5 8 L6 5.5 M3.5 8 L6 10.5 M12.5 8 L10 5.5 M12.5 8 L10 10.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
+    </div>
+    <button id="tbMoreBtn" class="icon" title="More: World, View, Save, Open, Demo, Clear" aria-label="More">
+      <svg viewBox="0 0 16 16" width="16" height="16"><g fill="currentColor"><circle cx="3" cy="8" r="1.7"/><circle cx="8" cy="8" r="1.7"/><circle cx="13" cy="8" r="1.7"/></g></svg>
+    </button>
+    <div id="tbExtra">
+    <div class="group">
       <button id="worldBtn" title="World settings: gravity, friction, drag, sim speed (saved with the build)">World</button>
       <button id="gridBtn" title="View: theme, grid lattice, pitch, brightness (this device, not saved with the build)">View</button>
     </div>
@@ -51,11 +57,14 @@
         <option value="">Demo...</option>
         <option value="walker">Walker</option>
         <option value="hopper">Hopper</option>
+        <option value="inchworm">Inchworm</option>
         <option value="bridge">Bridge</option>
+        <option value="catapult">Catapult</option>
         <option value="merry">Merry-go-round</option>
         <option value="chain">Chain</option>
       </select>
       <button id="clearBtn" title="Clear the board (Undo brings it back)">Clear</button>
+    </div>
     </div>
   </header>
   <div id="main">
@@ -63,14 +72,6 @@
       <div class="palItem active" data-tool="select" title="Select / move (V)">
         <svg viewBox="0 0 22 22" width="22" height="22"><path d="M5 2.5 L17.5 11 L11.7 12.3 L14.8 18.6 L12.3 19.9 L9.2 13.6 L5 17 Z" fill="currentColor"/></svg>
         <div class="lbl">Select</div>
-      </div>
-      <div class="palItem" data-tool="group" title="Group: drag a box to select several nodes, then copy / mirror / move them (M)">
-        <svg viewBox="0 0 22 22" width="22" height="22"><rect x="3.5" y="3.5" width="15" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="3 2.2"/><circle cx="8.5" cy="8.5" r="1.8" fill="currentColor"/><circle cx="14" cy="13.5" r="1.8" fill="currentColor"/></svg>
-        <div class="lbl">Group</div>
-      </div>
-      <div class="palItem" data-tool="weld" title="Weld: tap a node to weld / unweld it, tap a beam to put a welded hub in it, drag a node onto another to merge them (W)">
-        <svg viewBox="0 0 22 22" width="22" height="22"><path d="M3 11 H19" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><rect x="7.5" y="7.5" width="7" height="7" rx="1.5" fill="currentColor"/><path d="M11 3 V7 M11 15 V19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        <div class="lbl">Weld</div>
       </div>
       <div class="palItem" data-tool="node" title="Place nodes (N). Tap on a beam to put a welded hub in it.">
         <svg viewBox="0 0 22 22" width="22" height="22"><circle cx="11" cy="11" r="4" fill="currentColor"/></svg>
@@ -87,6 +88,14 @@
       <div class="palItem" data-tool="actuator" title="Actuator: a muscle - its length follows a wave (A)">
         <svg viewBox="0 0 22 22" width="22" height="22"><path d="M4 18 L9 13 M13 9 L18 4" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><rect x="8.4" y="8.4" width="5.2" height="5.2" rx="1.2" fill="currentColor"/></svg>
         <div class="lbl">Actuator</div>
+      </div>
+      <div class="palItem" data-tool="weld" title="Weld: tap a node to weld / unweld it, tap a beam to put a welded hub in it, drag a node onto another to merge them (W)">
+        <svg viewBox="0 0 22 22" width="22" height="22"><path d="M3 11 H19" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><rect x="7.5" y="7.5" width="7" height="7" rx="1.5" fill="currentColor"/><path d="M11 3 V7 M11 15 V19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <div class="lbl">Weld</div>
+      </div>
+      <div class="palItem" data-tool="group" title="Group: drag a box to select several nodes, then copy / mirror / move them (M)">
+        <svg viewBox="0 0 22 22" width="22" height="22"><rect x="3.5" y="3.5" width="15" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="3 2.2"/><circle cx="8.5" cy="8.5" r="1.8" fill="currentColor"/><circle cx="14" cy="13.5" r="1.8" fill="currentColor"/></svg>
+        <div class="lbl">Group</div>
       </div>
       <div class="palItem" data-tool="chain" title="Chain: drag to lay a run of links (one per grid pitch). Sags, swings, wraps over solid members (C)">
         <svg viewBox="0 0 22 22" width="22" height="22"><g fill="none" stroke="currentColor" stroke-width="1.9"><rect x="1.5" y="8" width="8" height="6" rx="3"/><rect x="7" y="8" width="8" height="6" rx="3"/><rect x="12.5" y="8" width="8" height="6" rx="3"/></g></svg>
@@ -111,7 +120,7 @@
       <div id="propsBody"></div>
     </aside>
   </div>
-  <footer id="statusBar"><span id="status">Ready.</span><span id="hint"></span></footer>
+  <footer id="statusBar"><span id="status">Ready.</span><span id="hint"></span><span id="verMobile"></span></footer>
 </div>
 <div id="libModal" hidden>
   <div class="fk-modal-box">

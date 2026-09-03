@@ -1,10 +1,19 @@
 // ForgeKit Dial - a rotary value control drawn on a canvas.
 //
-// Descended from CircuitForge's value knob (its decade-per-turn log dial),
-// generalised for bounded values: one 270-degree sweep spans the target's
-// [min, max] and turns snap to `step`, so a phase dial with step 1/24
-// clicks through the standard fractions and a mass dial with step 0.1
-// never lands on 1.37.
+// Descended from CircuitForge's value knob, generalised. Two modes:
+//
+//   bounded (default): one 270-degree sweep spans [min, max], turns snap
+//   to `step`, so a phase dial with step 1/24 clicks through the standard
+//   fractions and a mass dial with step 0.1 never lands on 1.37.
+//
+//   log (mode: 'log'): unbounded, one full revolution = one DECADE, the
+//   marker shows the position within the decade, sign is preserved
+//   (a -5 V source turned stays negative), magnitude clamped to
+//   [minMag, maxMag] (default 1e-15..1e15), +/- nudge the second digit.
+//   This is CircuitForge's part-value knob.
+//
+// setMessage(title, main, sub) shows text instead of a value (a switch's
+// OPEN/CLOSED, "3 parts", "= for options") while taps still fire.
 //
 // Pointer Events only (mouse / touch / pen). A tap (no rotation beyond a
 // small deadzone) fires onTap instead of nudging the value - CircuitForge
@@ -18,6 +27,7 @@
 //   dial.setTarget({ value: 0.25, min: 0, max: 1, step: 1 / 24, label: 'phase', fmt: fmtPhase });
 
 import { cssVar } from './theme.js';
+import { formatValue, decadeFrac, decadeOf } from './units.js';
 
 export const SWEEP = 1.5 * Math.PI;       // 270 degrees of travel
 export const START = 0.75 * Math.PI;      // 7:30 on a clock face
@@ -44,15 +54,38 @@ export function fracToValue(f, min, max, step) {
   return clamp(snapStep(v, min, step), min, max);
 }
 
+// ---- log mode math ---------------------------------------------------------
+// A turn of dRad radians scales |v| by 10^(dRad / 2pi); clockwise on a
+// negative value moves it toward zero (its signed value goes UP), like
+// CircuitForge's knob. Zero / non-finite start at 1.
+export function logTurn(v, dRad, minMag = 1e-15, maxMag = 1e15) {
+  const sign = v < 0 ? -1 : 1;
+  const a = Number.isFinite(v) && v !== 0 ? Math.abs(v) : 1;
+  const mag = clamp(a * Math.pow(10, (sign < 0 ? -dRad : dRad) / (2 * Math.PI)), minMag, maxMag);
+  return sign * mag;
+}
+
+// +/- one unit of the second digit: 4.7k -> 4.8k, 220u -> 230u.
+export function logNudge(v, dir, minMag = 1e-15, maxMag = 1e15) {
+  const base = Number.isFinite(v) ? v : 1;
+  const step = decadeOf(base) / 10;
+  const out = +(base + dir * step).toPrecision(12);
+  if (out === 0 || (base > 0 && out < 0) || (base < 0 && out > 0)) return base > 0 ? minMag : -minMag;
+  const sign = out < 0 ? -1 : 1;
+  return sign * clamp(Math.abs(out), minMag, maxMag);
+}
+
 // ---- the widget -----------------------------------------------------------
 export class Dial {
-  constructor(canvas, { onChange, onTap, onStart, size = 110 } = {}) {
+  constructor(canvas, { onChange, onTap, onStart, onEnd, size = 110 } = {}) {
     this.canvas = canvas;
     this.size = size;
     this.onChange = onChange || (() => {});
     this.onTap = onTap || (() => {});
     this.onStart = onStart || (() => {});   // once per gesture / key - hosts push undo here
-    this.target = null;             // {value, min, max, step, label, unit, fmt, title}
+    this.onEnd = onEnd || (() => {});       // after a turn ends (not after a tap)
+    this.target = null;             // {value, min, max, step, label, unit, fmt, title, mode, minMag, maxMag}
+    this.message = null;            // {title, main, sub, color} when showing text instead of a value
     this._turn = null;
     canvas.style.touchAction = 'none';
     canvas.tabIndex = 0;
@@ -78,7 +111,8 @@ export class Dial {
   }
 
   setTarget(t) {
-    this.target = t ? { min: 0, max: 1, step: 0, unit: '', label: '', ...t } : null;
+    this.message = null;
+    this.target = t ? { min: 0, max: 1, step: 0, unit: '', label: '', mode: 'linear', minMag: 1e-15, maxMag: 1e15, ...t } : null;
     if (t) {
       this.canvas.setAttribute('aria-label', t.label || 'value');
       this.canvas.setAttribute('aria-valuemin', String(this.target.min));
@@ -87,10 +121,24 @@ export class Dial {
     this.draw();
   }
 
+  // Text instead of a value; taps still fire onTap. setTarget() clears it.
+  setMessage(title, main, sub = '', color = null) {
+    this.target = null;
+    this.message = { title, main, sub, color };
+    this.canvas.setAttribute('aria-label', main || title || '');
+    this.draw();
+  }
+
+  get isLog() { return !!this.target && this.target.mode === 'log'; }
+
   setValue(v, fire = false) {
     const t = this.target;
     if (!t) return;
-    const nv = clamp(snapStep(v, t.min, t.step), t.min, t.max);
+    let nv;
+    if (this.isLog) {
+      const sign = v < 0 ? -1 : 1;
+      nv = Number.isFinite(v) && v !== 0 ? sign * clamp(Math.abs(v), t.minMag, t.maxMag) : t.value;
+    } else nv = clamp(snapStep(v, t.min, t.step), t.min, t.max);
     if (nv === t.value && !fire) { this.draw(); return; }
     t.value = nv;
     this.canvas.setAttribute('aria-valuenow', String(nv));
@@ -101,6 +149,12 @@ export class Dial {
   nudge(dir, mult = 1) {
     const t = this.target;
     if (!t) return;
+    if (this.isLog) {
+      let v = t.value;
+      for (let i = 0; i < mult; i++) v = logNudge(v, dir, t.minMag, t.maxMag);
+      this.setValue(v, true);
+      return;
+    }
     const step = t.step > 0 ? t.step : (t.max - t.min) / 100;
     this.setValue(t.value + dir * step * mult, true);
   }
@@ -109,6 +163,7 @@ export class Dial {
     const t = this.target;
     if (!t) return '';
     if (t.fmt) return t.fmt(v);
+    if (this.isLog) return formatValue(v, t.unit);
     const dec = t.step > 0 ? Math.max(0, Math.ceil(-Math.log10(t.step))) : 2;
     return v.toFixed(Math.min(4, dec)) + (t.unit ? ' ' + t.unit : '');
   }
@@ -126,6 +181,20 @@ export class Dial {
     const text = cssVar('text', '#d3dce6'), dim = cssVar('dim', '#7c8ba1');
     const cx = S / 2, cy = S / 2 + 3, R = S * 0.36;
     g.textAlign = 'center';
+    g.lineCap = 'round';
+    const m = this.message;
+    if (m) {
+      if (m.title) { g.fillStyle = dim; g.font = '10px Consolas, monospace'; g.fillText(m.title, cx, 11); }
+      if (m.color) {
+        g.strokeStyle = m.color; g.lineWidth = 3;
+        g.beginPath(); g.arc(cx, cy, R, 0, 2 * Math.PI); g.stroke();
+      }
+      g.fillStyle = m.color || text; g.font = 'bold 14px Consolas, monospace';
+      g.fillText(m.main || '', cx, cy + 1);
+      g.fillStyle = dim; g.font = '10px Consolas, monospace';
+      if (m.sub) g.fillText(m.sub, cx, cy + 17);
+      return;
+    }
     if (!t) {
       g.fillStyle = dim; g.font = '11px Consolas, monospace';
       g.fillText('nothing to turn', cx, cy);
@@ -135,20 +204,28 @@ export class Dial {
       g.fillStyle = dim; g.font = '10px Consolas, monospace';
       g.fillText(t.title, cx, 11);
     }
-    // track
-    g.lineCap = 'round';
-    g.strokeStyle = track; g.lineWidth = 6;
-    g.beginPath(); g.arc(cx, cy, R, START, START + SWEEP); g.stroke();
-    // progress
-    const f = valueToFrac(t.value, t.min, t.max);
-    if (f > 0) {
+    if (this.isLog) {
+      // full ring; the marker shows where in the decade we are
+      g.strokeStyle = track; g.lineWidth = 7;
+      g.beginPath(); g.arc(cx, cy, R, 0, 2 * Math.PI); g.stroke();
+      const a = -Math.PI / 2 + decadeFrac(t.value) * 2 * Math.PI;
       g.strokeStyle = accent;
-      g.beginPath(); g.arc(cx, cy, R, START, START + SWEEP * f); g.stroke();
+      g.beginPath(); g.arc(cx, cy, R, a - 0.28, a + 0.28); g.stroke();
+    } else {
+      // track
+      g.strokeStyle = track; g.lineWidth = 6;
+      g.beginPath(); g.arc(cx, cy, R, START, START + SWEEP); g.stroke();
+      // progress
+      const f = valueToFrac(t.value, t.min, t.max);
+      if (f > 0) {
+        g.strokeStyle = accent;
+        g.beginPath(); g.arc(cx, cy, R, START, START + SWEEP * f); g.stroke();
+      }
+      // knob marker
+      const a = START + SWEEP * f;
+      g.fillStyle = accent;
+      g.beginPath(); g.arc(cx + R * Math.cos(a), cy + R * Math.sin(a), 5, 0, 2 * Math.PI); g.fill();
     }
-    // knob marker
-    const a = START + SWEEP * f;
-    g.fillStyle = accent;
-    g.beginPath(); g.arc(cx + R * Math.cos(a), cy + R * Math.sin(a), 5, 0, 2 * Math.PI); g.fill();
     // value + label
     g.fillStyle = text; g.font = 'bold 13px Consolas, monospace';
     g.fillText(this.format(t.value), cx, cy + 1);
@@ -164,13 +241,14 @@ export class Dial {
   _down(e) {
     e.preventDefault();
     try { this.canvas.setPointerCapture(e.pointerId); } catch (err) { /* synthetic */ }
-    this._turn = { angle: this._angle(e), pend: 0, tap: true, frac: this.target ? valueToFrac(this.target.value, this.target.min, this.target.max) : 0 };
+    this._turn = { angle: this._angle(e), pend: 0, tap: true, frac: this.target && !this.isLog ? valueToFrac(this.target.value, this.target.min, this.target.max) : 0 };
     this.canvas.focus({ preventScroll: true });
     if (this.target) this.onStart(this.target);
   }
   _move(e) {
     const tn = this._turn, t = this.target;
-    if (!tn || !t) return;
+    if (!tn) return;
+    if (!t) { tn.pend = 0; return; }   // message mode: only taps
     const a = this._angle(e);
     let d = a - tn.angle;
     if (d > Math.PI) d -= 2 * Math.PI;
@@ -181,6 +259,12 @@ export class Dial {
     // registers in full because rotation accumulates
     if (tn.tap && Math.abs(tn.pend) < DEADZONE) return;
     tn.tap = false;
+    if (this.isLog) {
+      const nv = logTurn(t.value, tn.pend, t.minMag, t.maxMag);
+      tn.pend = 0;
+      if (nv !== t.value) this.setValue(nv, true);
+      return;
+    }
     tn.frac = clamp(tn.frac + tn.pend / SWEEP, 0, 1);
     tn.pend = 0;
     const nv = fracToValue(tn.frac, t.min, t.max, t.step);
@@ -189,7 +273,9 @@ export class Dial {
   _up(e) {
     const tn = this._turn;
     this._turn = null;
-    if (tn && tn.tap && e.type === 'pointerup') this.onTap(this.target);
+    if (!tn) return;
+    if (tn.tap && e.type === 'pointerup') this.onTap(this.target);
+    else if (!tn.tap && this.target) this.onEnd(this.target);
   }
   _key(e) {
     const t = this.target;
@@ -199,10 +285,10 @@ export class Dial {
     switch (e.key) {
       case 'ArrowUp': case 'ArrowRight': this.nudge(1); break;
       case 'ArrowDown': case 'ArrowLeft': this.nudge(-1); break;
-      case 'PageUp': this.nudge(1, big); break;
-      case 'PageDown': this.nudge(-1, big); break;
-      case 'Home': this.setValue(t.min, true); break;
-      case 'End': this.setValue(t.max, true); break;
+      case 'PageUp': if (this.isLog) this.setValue(t.value * 10, true); else this.nudge(1, big); break;
+      case 'PageDown': if (this.isLog) this.setValue(t.value / 10, true); else this.nudge(-1, big); break;
+      case 'Home': if (!this.isLog) this.setValue(t.min, true); break;
+      case 'End': if (!this.isLog) this.setValue(t.max, true); break;
       default: return;
     }
     e.preventDefault();

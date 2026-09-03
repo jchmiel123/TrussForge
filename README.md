@@ -21,8 +21,10 @@ python tests/serve-smoke.py
 ```
 
 Load the "Walker" demo and press Run. "Hopper" is the same body
-driven into a bounding gait. "Bridge" is a Warren truss under a pumping
-load with the force view on. "Chain" drapes a chain over a solid bar.
+driven into a bounding gait; "Inchworm" runs a contraction wave down a
+three-hump body. "Bridge" is a Warren truss under a pumping load with
+the force view on. "Catapult" flings a ball off a solid arm into a stop
+bar. "Chain" drapes a chain over a solid bar.
 
 ## What you build with
 
@@ -122,7 +124,7 @@ load with the force view on. "Chain" drapes a chain over a solid bar.
 
 ## Headless verification hooks
 
-- URL params: `?demo=walker|hopper|bridge|merry|chain`, `&run=1` (auto-run),
+- URL params: `?demo=walker|hopper|inchworm|bridge|catapult|merry|chain`, `&run=1` (auto-run),
   `&check=N` (fast-forward N simulated seconds, publish centroid motion
   into `#checkResult` + `document.title` for `--dump-dom`),
   `&layout=1` (toolbar geometry dump).

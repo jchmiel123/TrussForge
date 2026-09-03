@@ -25,7 +25,7 @@ import { snapToLattice, forEachLatticePoint, rowHeight, rowOffset, PITCHES } fro
 // CONFIG / VERSION
 // ============================================================
 
-const APP_VERSION = (window.TRUSSFORGE_VERSION && window.TRUSSFORGE_VERSION.version) || '0.13.0';   // version.js (ForgeKit stamp) is the source of truth
+const APP_VERSION = (window.TRUSSFORGE_VERSION && window.TRUSSFORGE_VERSION.version) || '0.14.0';   // version.js (ForgeKit stamp) is the source of truth
 const PREFS_KEY = 'trussforge.prefs';
 const NODE_R = 0.055;         // node draw radius, meters
 const TAP_PX = 7;             // movement under this = a tap
@@ -1563,6 +1563,14 @@ $('strainBtn').addEventListener('click', () => {
 $('worldBtn').addEventListener('click', () => {
   select(sel.kind === 'world' ? null : 'world');
 });
+// phones: the World / View / file groups live behind "..."; opening it
+// changes the toolbar height, so the board must re-measure
+$('tbMoreBtn').addEventListener('click', () => {
+  const open = $('tbExtra').classList.toggle('open');
+  $('tbMoreBtn').classList.toggle('active', open);
+  resize();
+});
+$('verMobile').textContent = 'v' + APP_VERSION;
 $('gridBtn').addEventListener('click', () => {
   select(sel.kind === 'grid' ? null : 'grid');
 });
@@ -1752,6 +1760,9 @@ function loadDemo(name, { keepUndo = true } = {}) {
   fitView();
   const hint = DEMO_HINTS[name] || {};
   if (hint.forceView && !strainOn) $('strainBtn').click();
+  // crawlers leave the frame in seconds on a phone: follow them
+  follow = !!hint.follow;
+  $('followBtn').classList.toggle('active', follow);
   setStatus(hint.status || `Demo: ${name}.`);
   draw();
   return true;

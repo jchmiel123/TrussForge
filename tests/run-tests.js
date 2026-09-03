@@ -9,7 +9,7 @@ import {
   splitMember, mergeNodes, membersAt, getMember, chain,
 } from '../engine/model.js';
 import { step, run, waveValue, targetLength, memberForce, FIXED_DT, CONTACT_R } from '../engine/sim.js';
-import { walker, hopper, bridge, merry, chainDemo } from '../engine/demos.js';
+import { walker, hopper, bridge, merry, chainDemo, inchworm, catapult } from '../engine/demos.js';
 import { snapToLattice, forEachLatticePoint, rowHeight } from '../engine/lattice.js';
 
 let pass = 0, fail = 0;
@@ -750,6 +750,52 @@ function measurePeriod(state, signal, seconds) {
     const s2 = deserialize(JSON.parse(JSON.stringify(serialize(s))));
     checkTrue('T22l chain kind round-trips', s2.members.filter(m => m.kind === 'chain').length === 14);
   }
+}
+
+// ---- T23: catapult ---------------------------------------------------------
+{
+  const s = catapult();
+  const pivot = s.nodes.find(n => n.pinned && n.locked);
+  const ball = s.nodes.find(n => n.mass === 0.3);
+  const tip = s.nodes.find(n => n.mass === 0.5 && n.x > pivot.x);
+  let apex = 0, left = null, land = null;
+  for (let i = 0; i < Math.round(6 / dt); i++) {
+    step(s, dt);
+    apex = Math.max(apex, ball.y);
+    // distance from the ball to the arm's tip half
+    const dx = tip.x - pivot.x, dy = tip.y - pivot.y, l2 = dx * dx + dy * dy;
+    const t = Math.max(0, Math.min(1, ((ball.x - pivot.x) * dx + (ball.y - pivot.y) * dy) / l2));
+    const d = Math.hypot(ball.x - (pivot.x + t * dx), ball.y - (pivot.y + t * dy));
+    if (left === null && d > CONTACT_R + 0.05) left = s.t;
+    if (land === null && s.t > 0.5 && ball.y <= 1e-3) land = ball.x;
+  }
+  const armAng = Math.atan2(tip.y - pivot.y, tip.x - pivot.x) * 180 / Math.PI;
+  checkTrue('T23a the ball leaves the arm', left !== null && left < 1.5, `t=${fmt(left)}`);
+  checkTrue('T23b the ball flies high (apex > 2.2 m)', apex > 2.2, `apex=${fmt(apex)}`);
+  checkTrue('T23c the ball lands > 2.5 m past the pivot', land !== null && land - pivot.x > 2.5, `range=${fmt(land - pivot.x)}`);
+  check('T23d the arm ends resting on the 45 deg stop', armAng, 45, 6);
+  checkTrue('T23e everything stays finite', s.nodes.every(n => Number.isFinite(n.x) && Number.isFinite(n.y)));
+}
+
+// ---- T24: inchworm ---------------------------------------------------------
+{
+  const crawl = mu => {
+    const s = inchworm(); s.world.friction = mu;
+    const feet = s.nodes.filter(n => n.ry === 0);
+    const x0 = centroid(s).x;
+    let air = 0, maxY = 0, N = Math.round(20 / dt);
+    for (let i = 0; i < N; i++) {
+      step(s, dt);
+      if (feet.every(n => n.y > 1e-3)) air++;
+      for (const n of s.nodes) maxY = Math.max(maxY, n.y);
+    }
+    return { dx: centroid(s).x - x0, air: air / N, maxY };
+  };
+  const r4 = crawl(0.4), r7 = crawl(0.7), r12 = crawl(1.2);
+  checkTrue('T24a inchworm crawls forward at grip 0.4', r4.dx > 3, `dx=${fmt(r4.dx)} m`);
+  checkTrue('T24b inchworm crawls forward at grip 0.7', r7.dx > 3, `dx=${fmt(r7.dx)} m`);
+  checkTrue('T24c inchworm crawls forward at grip 1.2', r12.dx > 3, `dx=${fmt(r12.dx)} m`);
+  checkTrue('T24d it crawls, it does not hop (airborne < 10 %)', r7.air < 0.1 && r7.maxY < 1.5, `air=${fmt(100 * r7.air)}%`);
 }
 
 console.log('');
