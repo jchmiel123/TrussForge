@@ -181,27 +181,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 }
 .legend .keys { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border); }
 
-/* build library modal */
-#libModal {
-  position: fixed; inset: 0; background: var(--overlay);
-  display: flex; align-items: center; justify-content: center; z-index: 50;
-}
-#libModal.hidden { display: none; }
-.modalBox {
-  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-  padding: 14px 16px; width: min(480px, 92vw); max-height: 80vh; display: flex; flex-direction: column;
-}
-.modalBox h3 { margin-bottom: 4px; color: var(--accent2); font-size: 14px; }
-.modalBox .hint { color: var(--dim); font-size: 11px; margin-bottom: 8px; }
-.modalBtns { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; flex-wrap: wrap; }
-#libList { max-height: 50vh; overflow-y: auto; }
-.libRow {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 4px; border-bottom: 1px solid var(--line);
-}
-.libRow .nm { flex: 1; font: 13px Consolas, monospace; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.libRow .meta { color: var(--dim); font-size: 11px; white-space: nowrap; }
-.libRow.current .nm { color: var(--accent2); }
+/* build library modal: styled by ForgeKit (.fk-modal, .fk-modal-box, .fk-lib-row) */
 
 #statusBar {
   flex: 0 0 auto; display: flex; justify-content: space-between; gap: 12px;

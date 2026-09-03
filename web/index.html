@@ -5,13 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>TrussForge</title>
 <link rel="stylesheet" href="vendor/forgekit/forgekit.css">
-<link rel="stylesheet" href="vendor/forgekit/forgekit.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div id="app">
   <header id="toolbar">
-    <div class="brand">Truss<span>Forge</span><em id="ver">v0.12.0</em></div>
+    <div class="brand">Truss<span>Forge</span><em id="ver" class="version-tag" title="Build version">v0.13.0</em></div>
     <input id="projName" class="projName" maxlength="64" spellcheck="false" autocomplete="off" title="Project name - click to rename. Save stores it on the server under this name." value="Untitled">
     <div class="group">
       <button id="runBtn" class="accent" title="Run / pause the simulation (Space)">Run</button>
@@ -114,12 +113,12 @@
   </div>
   <footer id="statusBar"><span id="status">Ready.</span><span id="hint"></span></footer>
 </div>
-<div id="libModal" class="hidden">
-  <div class="modalBox">
+<div id="libModal" hidden>
+  <div class="fk-modal-box">
     <h3>Builds</h3>
-    <p class="hint" id="libHint">Saved on the server - the same list on every device.</p>
-    <div id="libList"></div>
-    <div class="modalBtns">
+    <p class="fk-modal-hint" id="libHint">Saved on the server - the same list on every device.</p>
+    <div id="libList" class="fk-lib-list"></div>
+    <div class="fk-modal-btns">
       <button id="libOpenFile" title="Open a .json build from this device">Open file...</button>
       <button id="libDownload" title="Download the current build as a .json file">Download current</button>
       <button id="libClose">Close</button>
@@ -127,6 +126,7 @@
   </div>
 </div>
 <div id="checkResult" style="display:none"></div>
+<script src="version.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.13.0 - 2026-09-02
+
+Reference consumer of ForgeKit 0.4.0 (Wave 2). No engine change; 120/120
+tests, serve-smoke ALL PASS.
+
+- Undo/redo is ForgeKit `History` (explicit mode); `pushUndo()` stays
+  the call, `hist.discard()` replaces the hub-split pop. Buttons via
+  `hist.bind`.
+- `resize()` uses `fitCanvas`; the build library modal is ForgeKit
+  `modal()` (Escape handled in capture, focus returns to the Open
+  button) with `renderLibrary` rows and `saveOrDownload` (server, else a
+  download - same behaviour, 90 fewer lines).
+- `tools/serve.py` is now 40 lines on the vendored `fkserve.py`
+  (DocLibrary with the trussforge validator/summary, `/api/builds`,
+  `TF_BUILDS_DIR`). Wire format unchanged; `tests/serve-smoke.py`
+  unchanged and green.
+- Prefs bag is ForgeKit `Prefs`; downloads use `downloadJSON`.
+- Version stamp ritual added (the app had none): `node tools/stamp.js`
+  writes `web/version.js`; the `#ver` chip reads "v<ver> - updated
+  <date time>". `APP_VERSION` follows the stamp.
+- `tools/__pycache__` untracked; `.gitignore` covers it.
+
 ## 0.12.0 - 2026-09-02
 
 Chains. 120/120 tests.

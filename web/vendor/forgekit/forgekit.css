@@ -69,3 +69,41 @@
 [data-tone="ok"] { color: var(--ok, #3fb950); }
 [data-tone="warn"] { color: var(--warn, #e3b341); }
 [data-tone="err"] { color: var(--err, #f85149); }
+
+/* ---- Modal: scrim + box (modal.js toggles the hidden attribute) -------- */
+.fk-modal {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--overlay, rgba(5, 8, 12, .7));
+}
+.fk-modal[hidden] { display: none !important; }
+.fk-modal-box {
+  background: var(--panel, #141c26); color: var(--text, #d3dce6);
+  border: 1px solid var(--border, #243244); border-radius: 12px;
+  padding: 14px 16px; width: min(480px, 92vw); max-height: 85vh;
+  display: flex; flex-direction: column;
+  box-shadow: 0 8px 30px var(--shadow, rgba(0, 0, 0, .5));
+}
+.fk-modal-box h3 { margin: 0 0 4px; color: var(--accent2, #58a6ff); font-size: 14px; }
+.fk-modal-hint { color: var(--dim, #7c8ba1); font-size: 11px; margin: 0 0 8px; }
+.fk-modal-btns { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; flex-wrap: wrap; }
+.fk-modal-btns button, .fk-lib-row button {
+  font: 600 12px "Segoe UI", system-ui, sans-serif; padding: 6px 11px; border-radius: 8px; cursor: pointer;
+  background: var(--panel2, #18222e); color: var(--text, #d3dce6); border: 1px solid var(--border, #243244);
+}
+.fk-modal-btns button:hover, .fk-lib-row button:hover { border-color: var(--accent, #2f81f7); }
+.fk-modal-btns button.fk-danger, .fk-lib-row button.fk-danger { color: var(--err, #f85149); }
+.fk-modal-btns button.fk-danger:hover, .fk-lib-row button.fk-danger:hover { border-color: var(--err, #f85149); }
+
+/* ---- Library rows (library.js renderLibrary) --------------------------- */
+.fk-lib-list { max-height: 50vh; overflow-y: auto; }
+.fk-lib-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 4px; border-bottom: 1px solid var(--line, #16202c);
+}
+.fk-lib-row .fk-nm { flex: 1; font: 13px Consolas, monospace; color: var(--text, #d3dce6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fk-lib-row .fk-meta { color: var(--dim, #7c8ba1); font-size: 11px; white-space: nowrap; }
+.fk-lib-row.fk-current .fk-nm { color: var(--accent2, #58a6ff); }
+@media (pointer: coarse) {
+  .fk-lib-row button, .fk-modal-btns button { min-height: 40px; }
+}

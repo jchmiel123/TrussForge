@@ -11,6 +11,12 @@ import {
 } from '../engine/model.js';
 import { applyTheme, THEMES, themeNames } from './vendor/forgekit/theme.js';
 import { ValuePod } from './vendor/forgekit/pod.js';
+import { Prefs } from './vendor/forgekit/prefs.js';
+import { History } from './vendor/forgekit/history.js';
+import { fitCanvas } from './vendor/forgekit/canvas.js';
+import { modal } from './vendor/forgekit/modal.js';
+import { LibraryClient, renderLibrary, saveOrDownload } from './vendor/forgekit/library.js';
+import { downloadJSON, slug } from './vendor/forgekit/files.js';
 import { step, memberForce, FIXED_DT, WAVE_TYPES } from '../engine/sim.js';
 import { DEMOS, DEMO_HINTS } from '../engine/demos.js';
 import { snapToLattice, forEachLatticePoint, rowHeight, rowOffset, PITCHES } from '../engine/lattice.js';
@@ -19,8 +25,7 @@ import { snapToLattice, forEachLatticePoint, rowHeight, rowOffset, PITCHES } fro
 // CONFIG / VERSION
 // ============================================================
 
-const APP_VERSION = '0.12.0';
-const BUILD_DATE = '2026-09-02';
+const APP_VERSION = (window.TRUSSFORGE_VERSION && window.TRUSSFORGE_VERSION.version) || '0.13.0';   // version.js (ForgeKit stamp) is the source of truth
 const PREFS_KEY = 'trussforge.prefs';
 const NODE_R = 0.055;         // node draw radius, meters
 const TAP_PX = 7;             // movement under this = a tap
@@ -48,17 +53,15 @@ let strainOn = false;         // force view: color members by axial force
 // Grid / view preferences: per device (localStorage), NOT part of the
 // build file - open any save and change the lattice to suit it.
 const PREF_DEFAULTS = { theme: 'forge', gridType: 'square', pitch: 0.25, gridStyle: 'dots', gridBright: 0.5, gridSize: 2 };
-let prefs = { ...PREF_DEFAULTS };
-try { prefs = { ...PREF_DEFAULTS, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; } catch (e) { /* defaults */ }
+const prefStore = new Prefs(PREFS_KEY, PREF_DEFAULTS);
+let prefs = prefStore.all();
 if (!PITCHES.includes(prefs.pitch)) prefs.pitch = PREF_DEFAULTS.pitch;
 if (!THEMES[prefs.theme]) prefs.theme = 'forge';
 // ForgeKit theme: CSS tokens for the chrome + a canvas palette for the board
 let theme = applyTheme(prefs.theme);
 const hexRgb = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
 const withAlpha = (h, a) => `rgba(${hexRgb(h).join(',')},${a})`;
-function savePrefs() {
-  try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) { /* ignore */ }
-}
+function savePrefs() { prefStore.set(prefs); }
 let sel = { kind: null, id: 0 };       // kind: 'node' | 'member' | 'group' (ids[]) | 'world' | null
 let cam = { x: 0.6, y: 0.9, zoom: 110 };   // world center + px per meter
 let toolHint = '';
@@ -77,11 +80,8 @@ let vw = 0, vh = 0, dpr = 1;
 let pendingFit = false;     // fitView ran before the board had a real size
 
 function resize() {
-  dpr = window.devicePixelRatio || 1;
-  const r = canvas.getBoundingClientRect();
-  vw = r.width; vh = r.height;
-  canvas.width = Math.round(vw * dpr);
-  canvas.height = Math.round(vh * dpr);
+  const fit = fitCanvas(canvas);
+  dpr = fit.dpr; vw = fit.w; vh = fit.h;
   if (pendingFit && vw > 50 && vh > 50) fitView();
   draw();
 }
@@ -518,47 +518,27 @@ function distToSeg(px, py, x1, y1, x2, y2) {
 // UNDO / REDO  (snapshots of the serialized build; cheap for toy sizes)
 // ============================================================
 
-const undoStack = [], redoStack = [];
-const snapshot = () => JSON.stringify(serialize(state));
-
-// Call BEFORE a mutation. Identical consecutive snapshots collapse, so it
-// is safe to call speculatively (pointerdown on a node that ends up a tap).
-function pushUndo() {
-  const s = snapshot();
-  if (undoStack.length && undoStack[undoStack.length - 1] === s) return;
-  undoStack.push(s);
-  if (undoStack.length > UNDO_DEPTH) undoStack.shift();
-  redoStack.length = 0;
-  syncUndoButtons();
-}
-function undo() {
-  if (!undoStack.length) return;
-  redoStack.push(snapshot());
-  restoreSnapshot(undoStack.pop());
-  setStatus('Undo.');
-}
-function redo() {
-  if (!redoStack.length) return;
-  undoStack.push(snapshot());
-  restoreSnapshot(redoStack.pop());
-  setStatus('Redo.');
-}
+// ForgeKit History, explicit mode. Call pushUndo() BEFORE a mutation;
+// identical consecutive snapshots collapse, so it is safe to call
+// speculatively (pointerdown on a node that ends up a tap).
+const hist = new History({
+  snapshot: () => JSON.stringify(serialize(state)),
+  restore: restoreSnapshot,
+  depth: UNDO_DEPTH,
+});
+function pushUndo() { hist.push(); }
+function undo() { if (hist.undo()) setStatus('Undo.'); }
+function redo() { if (hist.redo()) setStatus('Redo.'); }
 function restoreSnapshot(s) {
   state = deserialize(JSON.parse(s));     // lands in the build pose
   if (running) setRunning(false);
   syncToolbar();
   syncName();
-  syncUndoButtons();
   select(null);
   markDirty();
   draw();
 }
-function syncUndoButtons() {
-  $('undoBtn').disabled = !undoStack.length;
-  $('redoBtn').disabled = !redoStack.length;
-}
-$('undoBtn').addEventListener('click', undo);
-$('redoBtn').addEventListener('click', redo);
+hist.bind($('undoBtn'), $('redoBtn'));
 
 // ============================================================
 // POINTER INPUT  (Pointer Events only - mouse / touch / pen)
@@ -837,7 +817,7 @@ function insertHub(m, px, py) {
   const t = snapPt(wx(px), wy(py));
   pushUndo();
   const r = splitMember(state, m.id, t.x, t.y);
-  if (!r) { undoStack.pop(); syncUndoButtons(); setStatus('Tap nearer the middle of the member to add a hub.', true); return; }
+  if (!r) { hist.discard(); setStatus('Tap nearer the middle of the member to add a hub.', true); return; }
   if (running) rebuildBraces(state, true);
   markDirty();
   select('node', r.node.id);
@@ -1537,7 +1517,7 @@ function changeKind(m, kind) {
 // TOOLBAR
 // ============================================================
 
-$('ver').textContent = `v${APP_VERSION} - ${BUILD_DATE}`;
+// #ver (.version-tag) is filled by web/version.js - run node tools/stamp.js before deploy
 
 const runBtn = $('runBtn');
 function setRunning(r) {
@@ -1653,7 +1633,7 @@ window.addEventListener('keydown', ev => {
   else if (k === 's') setTool('spring');
   else if (k === 'a') setTool('actuator');
   else if (k === 'e') setTool('erase');
-  else if (k === 'escape') { if (!libModal.classList.contains('hidden')) closeLibrary(); else select(null); }
+  else if (k === 'escape') select(null);   // a modal's Escape is handled (and stopped) by ForgeKit
   else if (k === 'delete' || k === 'backspace') {
     if (selectedNode()) deleteSelectedNode();
     else if (sel.kind === 'group') deleteGroup();
@@ -1675,24 +1655,11 @@ function buildDoc() {
   doc.savedAt = new Date().toISOString();
   return doc;
 }
-const slug = s => (s || 'trussforge-build').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'trussforge-build';
+const lib = new LibraryClient({ base: '/api/builds', listKey: 'builds' });
 
 function downloadFile() {
-  const doc = buildDoc();
-  const blob = new Blob([JSON.stringify(doc, null, 1)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = slug(state.name) + '.json';
-  a.click();
-  URL.revokeObjectURL(a.href);
-  setStatus(`Downloaded ${a.download}.`);
-}
-
-async function api(path, opts) {
-  const r = await fetch('/api/builds' + path, opts);
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
-  return j;
+  const fn = downloadJSON(slug(state.name, 'trussforge-build') + '.json', buildDoc());
+  setStatus(`Downloaded ${fn}.`);
 }
 
 async function saveToServer() {
@@ -1702,17 +1669,9 @@ async function saveToServer() {
     nameEl.focus();
     return;
   }
-  try {
-    const out = await api('/' + encodeURIComponent(name), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildDoc()),
-    });
-    setStatus(`Saved "${out.name}" to the server (${out.nodes} nodes, ${out.members} members).`);
-  } catch (e) {
-    downloadFile();
-    setStatus(`Server unreachable (${e.message}) - downloaded ${slug(name)}.json instead.`, true);
-  }
+  const r = await saveOrDownload(lib, name, buildDoc(), { fallback: 'trussforge-build' });
+  if (r.where === 'server') setStatus(`Saved "${r.result.name}" to the server (${r.result.nodes} nodes, ${r.result.members} members).`);
+  else setStatus(`Server unreachable (${r.error.message}) - downloaded ${r.filename} instead.`, true);
 }
 
 function adoptState(next, label) {
@@ -1728,63 +1687,24 @@ function adoptState(next, label) {
   draw();
 }
 
-const libModal = $('libModal');
-function openLibrary() {
-  libModal.classList.remove('hidden');
-  refreshLibrary();
-}
-function closeLibrary() { libModal.classList.add('hidden'); }
-async function refreshLibrary() {
-  const list = $('libList');
-  list.innerHTML = '<p class="hint">loading...</p>';
-  try {
-    const { builds } = await api('');
-    list.innerHTML = '';
-    $('libHint').textContent = 'Saved on the server - the same list on every device.';
-    if (!builds.length) {
-      list.innerHTML = '<p class="hint">Nothing saved yet. Name your build (click the title) and press Save.</p>';
-      return;
-    }
-    for (const b of builds) {
-      const row = document.createElement('div');
-      row.className = 'libRow' + (b.name === state.name ? ' current' : '');
-      const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = b.name;
-      const meta = document.createElement('span'); meta.className = 'meta';
-      const when = b.savedAt ? new Date(b.savedAt) : null;
-      meta.textContent = b.corrupt ? 'corrupt' :
-        `${b.nodes} nodes, ${b.members} members${when && !isNaN(when) ? ' - ' + when.toLocaleDateString() : ''}`;
-      const loadB = document.createElement('button'); loadB.textContent = 'Load';
-      loadB.onclick = async () => {
-        try {
-          const doc = await api('/' + encodeURIComponent(b.name));
-          adoptState(deserialize(doc), `Opened "${b.name}" from the server.`);
-          closeLibrary();
-        } catch (e) { setStatus(e.message, true); }
-      };
-      const delB = document.createElement('button'); delB.textContent = 'Del'; delB.className = 'danger';
-      delB.onclick = async () => {
-        if (delB.textContent === 'Del') {     // two-tap confirm, phone-friendly
-          delB.textContent = 'sure?';
-          setTimeout(() => { delB.textContent = 'Del'; }, 2500);
-          return;
-        }
-        try { await api('/' + encodeURIComponent(b.name), { method: 'DELETE' }); refreshLibrary(); }
-        catch (e) { setStatus(e.message, true); }
-      };
-      row.append(nm, meta, loadB, delB);
-      list.appendChild(row);
-    }
-  } catch (e) {
-    list.innerHTML = '';
-    $('libHint').textContent = `Server library unreachable (${e.message}). You can still open or download files.`;
-  }
+const libModal = modal($('libModal'), { onOpen: refreshLibrary });
+function openLibrary() { libModal.open(); }
+function closeLibrary() { libModal.close(); }
+function refreshLibrary() {
+  return renderLibrary($('libList'), {
+    client: lib, current: state.name, hintEl: $('libHint'),
+    emptyText: 'Nothing saved yet. Name your build (click the title) and press Save.',
+    unreachableText: 'Server library unreachable - you can still open or download files',
+    meta: b => `${b.nodes} nodes, ${b.members} members`,
+    onLoad: (doc, b) => { adoptState(deserialize(doc), `Opened "${b.name}" from the server.`); closeLibrary(); },
+    onError: m => setStatus(m, true),
+  });
 }
 $('saveBtn').addEventListener('click', saveToServer);
 $('openBtn').addEventListener('click', openLibrary);
 $('libClose').addEventListener('click', closeLibrary);
 $('libDownload').addEventListener('click', () => { downloadFile(); });
 $('libOpenFile').addEventListener('click', () => $('openFile').click());
-libModal.addEventListener('click', ev => { if (ev.target === libModal) closeLibrary(); });
 $('openFile').addEventListener('change', async ev => {
   const f = ev.target.files[0];
   ev.target.value = '';
@@ -1981,7 +1901,7 @@ window.TF = {
   setTool,
   select,
   undo, redo,
-  get undoDepth() { return undoStack.length; },
+  get undoDepth() { return hist.undoStack.length; },
   centroid: () => centroid(state),
   get cam() { return cam; },
   get tool() { return tool; },
@@ -1998,7 +1918,7 @@ setTool('select');
 resize();
 handleParams();
 syncToolbar();
-syncUndoButtons();
+// undo/redo buttons are kept in step by hist.bind()
 syncPasteButton();
 syncName();
 requestAnimationFrame(frame);

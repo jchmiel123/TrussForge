@@ -119,7 +119,13 @@ Everything in-house and dependency-free.
   and the renderer reads `theme.canvas.*`. Toolbar groups get
   `flex-shrink: 0` on mobile so rows wrap whole groups.
 - `web/vendor/forgekit/` - VENDORED copy of D:\CodeLab\ForgeKit
-  (`python tools/sync-forgekit.py`). Edit the kit, not the copy.
+  (`python tools/sync-forgekit.py`, a shim onto ForgeKit/tools/vendor.py).
+  Edit the kit, not the copy. As of 0.13.0 the app uses: theme, ValuePod,
+  Prefs, History (undo/redo, explicit mode: `pushUndo()` before a
+  mutation, `hist.discard()` to abort a speculative push), fitCanvas,
+  modal() for #libModal, LibraryClient/renderLibrary/saveOrDownload for
+  the build library, downloadJSON, and stamp.mjs. Look in the kit before
+  writing a helper here.
   ValuePod (`pod`) targets come from `podTargets()`; keys match the
   panel slider ids so `refreshSliders()` keeps both in step.
 
@@ -127,15 +133,18 @@ Everything in-house and dependency-free.
 
 - Lives on Vulcan at ~/vulcan/repos/TrussForge, served by launchd agent
   com.vulcan.trussforge running `tools/serve.py 8337 <repo> 0.0.0.0`
-  (userland python, KeepAlive) - static files + the build library API
+  (userland python, KeepAlive) - a 40-line wrapper on the vendored
+  `web/vendor/forgekit/fkserve.py` (no-store static + DocLibrary):
+  static files + the build library API
   (`/api/builds`, files in ~/.trussforge-builds OUTSIDE the repo so a
   deploy never touches them). Open http://vulcan:8337/web/index.html -
   the AnvilLab portal at http://vulcan/ has its card. After changing
   serve.py: `launchctl kickstart -k gui/$(id -u)/com.vulcan.trussforge`.
 - Vulcan has NO git: deploy = `git archive` locally, scp the tarball,
-  extract over ~/vulcan/repos/TrussForge. Static files - no restart
-  needed. Restart anyway: `ssh vulcan "launchctl kickstart -k
-  gui/$(id -u)/com.vulcan.trussforge"`.
+  extract over ~/vulcan/repos/TrussForge. Static files need no restart,
+  but serve.py / fkserve.py changes do: `ssh vulcan "launchctl kickstart
+  -k gui/$(id -u)/com.vulcan.trussforge"`. Run `node tools/stamp.js`
+  BEFORE the archive (see below).
 - Portal card lives in ~/vulcan/repos/AnvilLab/server.py (SERVICES
   list) + the icon map in its index.html; restart com.vulcan.anvillab
   after editing.
@@ -154,9 +163,11 @@ Everything in-house and dependency-free.
   Chrome headless clamps window width to 500 px min - phone-width
   screenshots get cropped, not reflowed; use devtools emulation for
   real narrow-viewport checks. `?layout=1` dumps toolbar geometry.
-- SemVer in `VERSION`; update `CHANGELOG.md` and the version constants
-  in `web/app.js` (APP_VERSION, BUILD_DATE) with every feature commit -
-  the version + build date badge on the page is a CodeLab convention.
+- SemVer in `VERSION`; update `CHANGELOG.md` with every feature commit.
+  **Run `node tools/stamp.js` before every deploy** (ForgeKit stamp): it
+  writes `web/version.js`, which fills the `#ver` chip with "v<ver> -
+  updated <date time>" and sets `window.TRUSSFORGE_VERSION`; app.js's
+  APP_VERSION reads that. Never hand-edit the version in app.js.
 
 ## To do (Justin's asks, keep this list)
 
