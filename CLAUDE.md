@@ -109,6 +109,9 @@ Everything in-house and dependency-free.
   - Project name: `state.name` (in the file); `#projName` input in the
     toolbar, `syncName()` after every state swap. Save = `saveToServer`
     (PUT /api/builds/<name>, download fallback); Open = `#libModal`.
+  - `DEMO_HINTS[name].view` = explicit fit box (catapult); `follow`
+    turns the follow camera on (crawlers). `followCam()` is shared by
+    frame() and TF.step so in-frame checks under TF.step are honest.
   - Force view (`strainOn`, key F): `strainStyle(f)` maps f / fRef to
     gray->red / gray->blue; fRef = total unpinned mass * g (floor 5 N),
     recomputed per draw. Member panel `#pv_force` is refreshed by

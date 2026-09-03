@@ -254,6 +254,11 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
     font-size: 9px; letter-spacing: 1.5px; color: var(--dim);
   }
   #tbExtra.open .group.right { margin-left: 0; }
+}
+/* phone in landscape: the board is ~230 px tall, so the dial pod shrinks */
+@media (max-height: 460px) {
+  .fk-pod { transform: scale(.78); transform-origin: bottom right; }
+  #nodePill button { padding: 5px 9px; }
 
   #props {
     position: fixed; left: 0; right: 0; bottom: 0; width: auto;

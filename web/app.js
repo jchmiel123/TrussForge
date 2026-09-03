@@ -82,7 +82,7 @@ let pendingFit = false;     // fitView ran before the board had a real size
 function resize() {
   const fit = fitCanvas(canvas);
   dpr = fit.dpr; vw = fit.w; vh = fit.h;
-  if (pendingFit && vw > 50 && vh > 50) fitView();
+  if (pendingFit && vw > 50 && vh > 50) { const bx = pendingBox; pendingBox = null; fitView(bx); }
   draw();
 }
 window.addEventListener('resize', resize);
@@ -101,13 +101,15 @@ function snapPt(x, y) {
 // the lattice, so snapping the offset keeps pasted nodes on-grid.
 const snapVec = snapPt;
 
-function fitView() {
+let pendingBox = null;      // explicit box to fit (demo hints), retried like pendingFit
+function fitView(box) {
   // a hidden / not-yet-laid-out board has no size: fit again on resize
   pendingFit = !(vw > 50 && vh > 50);
-  if (pendingFit) return;
-  if (!state.nodes.length) { cam = { x: 0.6, y: 0.9, zoom: 110 }; return; }
+  if (pendingFit) { pendingBox = box || null; return; }
+  if (!box && !state.nodes.length) { cam = { x: 0.6, y: 0.9, zoom: 110 }; return; }
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-  for (const n of state.nodes) {
+  if (box) { ({ x0, x1, y0, y1 } = box); }
+  else for (const n of state.nodes) {
     x0 = Math.min(x0, n.x); x1 = Math.max(x1, n.x);
     y0 = Math.min(y0, n.y); y1 = Math.max(y1, n.y);
   }
@@ -1757,8 +1759,8 @@ function loadDemo(name, { keepUndo = true } = {}) {
   select(null);
   syncToolbar();
   syncName();
-  fitView();
   const hint = DEMO_HINTS[name] || {};
+  fitView(hint.view);
   if (hint.forceView && !strainOn) $('strainBtn').click();
   // crawlers leave the frame in seconds on a phone: follow them
   follow = !!hint.follow;
@@ -1860,17 +1862,21 @@ function frame(ts) {
     acc -= FIXED_DT; n++;
   }
   if (n === MAX_STEPS_FRAME) acc = 0;   // cannot keep up: drop time
-  if (follow && state.nodes.length) {
-    const c = centroid(state);
-    cam.x += (c.x - cam.x) * 0.06;
-    cam.y += (Math.max(c.y, 0.6) - cam.y) * 0.06;
-  }
+  followCam();
   if (ts > statusHoldUntil) {
     $('status').textContent =
       `t=${state.t.toFixed(1)}s  ${state.nodes.length} nodes, ${state.members.length} members`;
   }
   updateForceReadout();
   draw();
+}
+
+// follow camera: ease toward the build's centroid (kept above the ground)
+function followCam(rate = 0.06) {
+  if (!follow || !state.nodes.length) return;
+  const c = centroid(state);
+  cam.x += (c.x - cam.x) * rate;
+  cam.y += (Math.max(c.y, 0.6) - cam.y) * rate;
 }
 
 function updateForceReadout() {
@@ -1886,7 +1892,7 @@ function updateForceReadout() {
 window.TF = {
   get state() { return state; },
   set state(s) { state = s; },
-  step: (n = 1) => { for (let i = 0; i < n; i++) step(state, FIXED_DT); updateForceReadout(); draw(); },
+  step: (n = 1) => { for (let i = 0; i < n; i++) { step(state, FIXED_DT); if (i % 4 === 0) followCam(); } updateForceReadout(); draw(); },
   memberForce,
   copy: copySelection, paste: pasteClipboard, duplicate: duplicateSelection,
   selectBody,

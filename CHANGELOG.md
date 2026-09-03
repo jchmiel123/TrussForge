@@ -12,6 +12,11 @@ Inchworm and Catapult demos; phone layout pass. 129/129 tests.
   degrees. The ball leaves at 41 degrees, 2.5 m apex, ~2.9 m throw; the
   arm ends on the stop (T23a-e). A heavier weight or steeper cock just
   slides the ball off early - the sweep said so.
+- Demos on phones: crawlers follow the camera (follow logic shared by
+  the live loop and TF.step), the catapult fits its whole flight via a
+  per-demo view box (`DEMO_HINTS.view`, `fitView(box)`), the dial pod
+  shrinks on landscape phones. All seven demos verified fully in frame
+  at 375x812 and 812x375.
 - Phone layout: the toolbar was five rows (157 px) on a 375 px screen.
   Now two: brand + name + Run/Reset, then the icon strip with a "..."
   button that opens World / View / Save / Open / Demo / Clear as a

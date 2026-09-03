@@ -200,5 +200,6 @@ export const DEMO_HINTS = {
   merry: { status: 'Merry-go-round: anchored, welded hub. Press Run.' },
   chain: { status: 'Chain: 14 links over a solid bar. Press Run and watch it wrap.' },
   inchworm: { follow: true, status: 'Inchworm: three humps, a wave of contraction runs down the body. Press Run.' },
-  catapult: { status: 'Catapult: press Run. The weight drops, the arm hits the stop, the ball flies.' },
+  // the ball lands ~3 m past the pivot: fit the whole flight, not the build
+  catapult: { view: { x0: 0.2, x1: 5.4, y0: 0, y1: 3.0 }, status: 'Catapult: press Run. The weight drops, the arm hits the stop, the ball flies.' },
 };
