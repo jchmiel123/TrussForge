@@ -8,6 +8,7 @@ import {
   serialize, deserialize, centroid, DEFAULTS,
   componentOf, extractSub, insertSub, mirrorSub, fragmentBounds,
   splitMember, mergeNodes, chain,
+  bakeNodes, bakeRestPose, setRestFromCurrent,
 } from '../engine/model.js';
 import { applyTheme, THEMES, themeNames } from './vendor/forgekit/theme.js';
 import { ValuePod } from './vendor/forgekit/pod.js';
@@ -307,6 +308,27 @@ function drawMember(m) {
   } else {
     drawActuator(x1, y1, x2, y2, a, b, m, w, col);
   }
+  if (m.fixRest) drawRestLock(x1, y1, x2, y2, w);
+}
+
+// Locked rest length: two short bars across the member at 30 % and 70 %,
+// like dimension ticks - "this length is set, moving the ends stretches
+// it". Drawn in the node colour so it reads on every member kind.
+function drawRestLock(x1, y1, x2, y2, w) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len, ny = dx / len;
+  const h = Math.max(4, w * 1.6);
+  ctx.strokeStyle = theme.canvas.node;
+  ctx.lineWidth = Math.max(1.5, w * 0.45);
+  ctx.lineCap = 'butt';
+  ctx.beginPath();
+  for (const t of [0.3, 0.7]) {
+    const px = x1 + dx * t, py = y1 + dy * t;
+    ctx.moveTo(px - nx * h, py - ny * h);
+    ctx.lineTo(px + nx * h, py + ny * h);
+  }
+  ctx.stroke();
 }
 
 // Chain link: a hollow capsule along the member, so a run of them reads
@@ -876,16 +898,21 @@ function toggleInGroup(id) {
   select('group', [...gs]);
 }
 
-function bakeGroup(ids) {
+// A paused drag ended: adopt the new positions as the build pose and
+// re-bake the rest length of the members that changed - except locked
+// ones (fixRest), which keep their tuned length and are now pre-stressed.
+// One engine path (bakeNodes) for a single node and a group, so members
+// crossing a moved group's boundary are handled the same as a node's.
+function bakeMoved(ids) {
   if (!running) {
-    for (const id of ids) {
-      const n = getNode(state, id);
-      if (n) { n.rx = n.x; n.ry = n.y; }
-    }
-    rebuildBraces(state);
+    const r = bakeNodes(state, ids);
+    if (r.kept) setStatus(`${r.kept} locked member${r.kept === 1 ? ' keeps its' : 's keep their'} rest length (now pre-stressed). Unlock it in its panel, or tap "Rest = now".`);
+    if (sel.kind === 'member') renderProps();   // rest length may have changed
   }
   markDirty();
 }
+
+function bakeGroup(ids) { bakeMoved(ids); }
 
 function selectBody(nodeId) {
   select('group', componentOf(state, nodeId));
@@ -893,19 +920,8 @@ function selectBody(nodeId) {
 }
 
 function bakeNode(id) {
-  const n = getNode(state, id);
-  if (!n) return;
-  if (!running) {
-    // adopt the dragged position as the new build pose for this node
-    n.rx = n.x; n.ry = n.y;
-    for (const m of membersAt(state, n.id)) {
-      const a = getNode(state, m.a), b = getNode(state, m.b);
-      m.restLen = Math.hypot(b.x - a.x, b.y - a.y);
-    }
-    rebuildBraces(state);
-    if (sel.kind === 'member') renderProps();   // rest length may have changed
-  }
-  markDirty();
+  if (!getNode(state, id)) return;
+  bakeMoved([id]);
 }
 
 const TOOL_HINTS = {
@@ -1143,6 +1159,10 @@ const MEMBER_DESC = {
 const TIPS = {
   kind: 'Change what this member is. Beams and muscles are rigid, springs stretch.',
   restLen: 'Length the member wants to be. Change it while paused to pre-stress the build.',
+  fixRest: 'Locked: moving a node no longer changes this rest length. The member keeps the length you tuned and pulls or pushes toward it. Unlocked (default): a paused move re-measures it.',
+  restNow: 'Make the current length the rest length, right now. Works while running: pose the build, then tap.',
+  restNowGroup: 'Every member touching the group takes its current length as rest length (locked ones too).',
+  bakePose: 'Adopt the current pose of the whole build as its rest pose: positions and unlocked rest lengths. Use it after the sim settles under gravity. Locked members keep their length.',
   k: 'How hard the spring pulls back per meter of stretch.',
   c: 'How fast the spring stops bouncing. 0 = rings forever.',
   wtype: 'sine = smooth push/pull. triangle = constant-speed back and forth. smooth = holds long, holds short, rounded transitions.',
@@ -1328,10 +1348,28 @@ function renderMemberProps(m) {
       rows.push(propSlider('duty', 'time spent long', 0.05, 0.95, 0.05, m.wave.duty, ''));
     }
   }
+  rows.push(`<div class="toggles">
+    <button id="mFix" class="${m.fixRest ? 'active' : ''}" data-tip="${TIPS.fixRest}" title="${TIPS.fixRest}">${m.fixRest ? 'Length locked' : 'Lock length'}</button>
+    <button id="mRestNow" data-tip="${TIPS.restNow}" title="${TIPS.restNow}">Rest = now</button></div>`);
   rows.push(`<div class="propRow readout" data-tip="${TIPS.force}" title="${TIPS.force}"><label>force <span class="pv" id="pv_force">${fmtForce(memberForce(m))}</span></label></div>`);
   rows.push(`<div class="propBtns"><button id="mBody" data-tip="${TIPS.body}" title="${TIPS.body}">Select body</button><button id="mDel" class="danger">Delete</button></div>`);
   propsBody.innerHTML = rows.join('');
   $('mBody').addEventListener('click', () => selectBody(m.a));
+  $('mFix').addEventListener('click', () => {
+    pushUndo();
+    m.fixRest = !m.fixRest;
+    markDirty(); renderProps();
+    setStatus(m.fixRest ? 'Rest length locked: moving its nodes now pre-stresses this member instead of re-measuring it.' : 'Rest length unlocked: a paused move re-measures it.');
+    if (!running) draw();
+  });
+  $('mRestNow').addEventListener('click', () => {
+    pushUndo();
+    const L = setRestFromCurrent(state, m);
+    if (L === null) { hist.discard(); setStatus('The ends coincide - nothing to measure.', true); return; }
+    markDirty(); renderProps();
+    setStatus(`Rest length set to the current ${fmtVal(L)} m${m.kind === 'actuator' ? ' (mid length; short / long scaled with it)' : ''}.`);
+    if (!running) draw();
+  });
 
   if (m.kind !== 'actuator') wireProp('restLen', v => { m.restLen = v; rebuildBraces(state, running); });
   if (m.kind === 'spring') {
@@ -1371,6 +1409,7 @@ function renderGroupProps() {
   rows.push(`<p class="desc">${ids.length} node${ids.length === 1 ? '' : 's'}, ${mems.length} member${mems.length === 1 ? '' : 's'}${acts.length ? `, ${acts.length} muscle${acts.length === 1 ? '' : 's'}` : ''}. Drag a grouped node to move them all.</p>`);
   rows.push(`<div class="propBtns"><button id="gCopy" data-tip="${TIPS.copy}" title="${TIPS.copy}">Copy</button><button id="gPaste" data-tip="${TIPS.paste}" title="${TIPS.paste}">Paste</button></div>`);
   rows.push(`<div class="propBtns"><button id="gMirror" data-tip="${TIPS.mirror}" title="${TIPS.mirror}">Mirror</button><button id="gDel" class="danger">Delete</button></div>`);
+  rows.push(`<div class="propBtns"><button id="gRestNow" data-tip="${TIPS.restNowGroup}" title="${TIPS.restNowGroup}">Rest = now (all touching)</button></div>`);
   if (acts.length) {
     rows.push(`<div class="propTitle" style="margin-top:10px">Muscles in group</div>`);
     rows.push(propSlider('gperiod', 'period (all)', 0.2, 4, 0.05, acts[0].wave.period, 's'));
@@ -1389,6 +1428,15 @@ function renderGroupProps() {
     if (!running) draw();
   });
   $('gDel').addEventListener('click', deleteGroup);
+  $('gRestNow').addEventListener('click', () => {
+    pushUndo();
+    const touching = state.members.filter(m => gs.has(m.a) || gs.has(m.b));
+    let k = 0;
+    for (const m of touching) if (setRestFromCurrent(state, m) !== null) k++;
+    markDirty();
+    setStatus(`${k} member${k === 1 ? '' : 's'} took the current length as rest length.`);
+    if (!running) draw();
+  });
   if (acts.length) {
     wireProp('gperiod', v => { for (const m of acts) m.wave.period = v; });
     wireProp('gamp', v => { for (const m of acts) m.wave.amp = v; });
@@ -1450,7 +1498,16 @@ function renderWorldProps() {
     ${propSlider('gravity', 'gravity', 0, 25, 0.1, W.gravity, 'm/s2')}
     ${propSlider('friction', 'ground grip', 0, 2, 0.01, W.friction, '')}
     ${propSlider('drag', 'air drag', 0, 2, 0.01, W.drag, '')}
-    ${propSelect('speed', 'sim speed', ['0.25', '0.5', '1', '2', '4'], String(W.speed), v => v + 'x')}`;
+    ${propSelect('speed', 'sim speed', ['0.25', '0.5', '1', '2', '4'], String(W.speed), v => v + 'x')}
+    <div class="propBtns"><button id="wBake" data-tip="${TIPS.bakePose}" title="${TIPS.bakePose}">Adopt pose as rest</button></div>`;
+  $('wBake').addEventListener('click', () => {
+    pushUndo();
+    const r = bakeRestPose(state);
+    markDirty();
+    setStatus(`Current pose is now the rest pose: ${r.baked} rest length${r.baked === 1 ? '' : 's'} re-measured${r.kept ? `, ${r.kept} locked kept` : ''}. Reset returns here.`);
+    updateForceReadout();
+    if (!running) draw();
+  });
   wireProp('gravity', v => { W.gravity = v; });
   wireProp('friction', v => { W.friction = v; });
   wireProp('drag', v => { W.drag = v; });
@@ -1901,6 +1958,8 @@ window.TF = {
   get theme() { return theme; },
   pod,
   insertHub, mergeInto,
+  bakeNodes: ids => bakeNodes(state, ids), bakeRestPose: () => bakeRestPose(state),
+  setRestFromCurrent: m => setRestFromCurrent(state, typeof m === 'object' ? m : getMember(state, m)),
   set prefs(p) { prefs = { ...prefs, ...p }; savePrefs(); draw(); },
   snapPt,
   get strain() { return strainOn; },

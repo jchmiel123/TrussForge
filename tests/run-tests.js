@@ -7,6 +7,7 @@ import {
   getNode, centroid, rebuildBraces,
   componentOf, extractSub, insertSub, mirrorSub, translateSub, fragmentBounds,
   splitMember, mergeNodes, membersAt, getMember, chain,
+  bakeNodes, bakeRestPose, setRestFromCurrent,
 } from '../engine/model.js';
 import { step, run, waveValue, targetLength, memberForce, FIXED_DT, CONTACT_R } from '../engine/sim.js';
 import { walker, hopper, bridge, merry, chainDemo, inchworm, catapult } from '../engine/demos.js';
@@ -796,6 +797,75 @@ function measurePeriod(state, signal, seconds) {
   checkTrue('T24b inchworm crawls forward at grip 0.7', r7.dx > 3, `dx=${fmt(r7.dx)} m`);
   checkTrue('T24c inchworm crawls forward at grip 1.2', r12.dx > 3, `dx=${fmt(r12.dx)} m`);
   checkTrue('T24d it crawls, it does not hop (airborne < 10 %)', r7.air < 0.1 && r7.maxY < 1.5, `air=${fmt(100 * r7.air)}%`);
+}
+
+// ---- T25: rest-length lock + bake -----------------------------------------
+// Expected lengths are plain Pythagoras on the coordinates we set, never
+// read back from the engine.
+{
+  // a) fixRest round-trips through the file format and a fragment
+  const s = createState();
+  const a = addNode(s, 0, 1), b = addNode(s, 1, 1), c = addNode(s, 2, 1), d = addNode(s, 3, 1);
+  const ab = addMember(s, a.id, b.id, 'beam');
+  const bc = addMember(s, b.id, c.id, 'spring', { fixRest: true });
+  const cd = addMember(s, c.id, d.id, 'actuator', { wave: { amp: 0.25 } });
+  const s2 = deserialize(serialize(s));
+  checkTrue('T25a fixRest survives serialize/deserialize', getMember(s2, bc.id).fixRest === true && getMember(s2, ab.id).fixRest === false);
+  const frag = extractSub(s, [b.id, c.id]);
+  const s3 = createState(); const ids = insertSub(s3, frag, 0, 0);
+  checkTrue('T25a2 fixRest survives copy/paste (fragment)', s3.members[0].fixRest === true && ids.length === 2);
+
+  // b) moving an end while paused re-bakes an UNLOCKED member: b goes to
+  //    (1, 2) so a-b becomes sqrt(1 + 1)
+  b.x = 1; b.y = 2; b.px = b.x; b.py = b.y;
+  const r = bakeNodes(s, [b.id]);
+  check('T25b unlocked member re-bakes to the new geometry', ab.restLen, Math.SQRT2, 1e-12);
+  checkTrue('T25b2 rest pose follows the node', b.rx === 1 && b.ry === 2);
+  // c) the LOCKED spring b-c also changed geometry (now sqrt(1 + 1)) but
+  //    keeps its tuned rest length of 1
+  check('T25c locked member keeps its rest length', bc.restLen, 1, 1e-12);
+  checkTrue('T25c2 bakeNodes reports 1 baked, 1 kept', r.baked === 1 && r.kept === 1, JSON.stringify(r));
+
+  // d) group move: shift c and d together by (0, +3). c-d is inside the
+  //    group (length unchanged = 1); b-c crosses the boundary and is
+  //    locked, so it is kept; nothing else touches the group.
+  for (const n of [c, d]) { n.y += 3; n.py = n.y; }
+  const r2 = bakeNodes(s, [c.id, d.id]);
+  check('T25d member inside a moved group keeps length 1', cd.restLen, 1, 1e-12);
+  checkTrue('T25d2 crossing locked member kept, internal re-baked', r2.kept === 1 && r2.baked === 1, JSON.stringify(r2));
+  // now unlock b-c and bake again: it re-bakes to the real distance
+  // b=(1,2), c=(2,4): sqrt(1 + 4)
+  bc.fixRest = false;
+  bakeNodes(s, [c.id]);
+  check('T25d3 unlocked crossing member re-bakes', bc.restLen, Math.sqrt(5), 1e-12);
+
+  // e) "Rest = now" on an actuator: rest becomes the current length, amp
+  //    is untouched so short / long scale with it. Stretch c-d to 2.5.
+  d.x = c.x + 2.5; d.px = d.x;
+  const L = setRestFromCurrent(s, cd);
+  check('T25e setRestFromCurrent returns the new length', L, 2.5, 1e-12);
+  check('T25e2 actuator rest = current length', cd.restLen, 2.5, 1e-12);
+  check('T25e3 actuator amp untouched', cd.wave.amp, 0.25, 1e-12);
+  checkTrue('T25e4 setRestFromCurrent on coincident ends is a no-op', (() => {
+    const t = createState(); const p = addNode(t, 0, 0), q = addNode(t, 1, 0);
+    const m = addMember(t, p.id, q.id, 'beam'); q.x = 0; return setRestFromCurrent(t, m) === null && m.restLen === 1;
+  })());
+
+  // f) bakeRestPose = bakeNodes over everything, honouring the lock.
+  //    Lock a-b (re-baked to sqrt 2 in step b), drag every node +1 in x,
+  //    drop a alone -2 in y: a=(1,-1) b=(2,2) is really sqrt(1 + 9) but
+  //    the lock holds sqrt 2; b-c is b=(2,2) c=(3,4): sqrt(1 + 4).
+  ab.fixRest = true;
+  for (const n of s.nodes) { n.x += 1; n.px = n.x; }
+  a.y -= 2; a.py = a.y;
+  const r3 = bakeRestPose(s);
+  check('T25f locked a-b keeps sqrt 2 under bakeRestPose', ab.restLen, Math.SQRT2, 1e-12);
+  check('T25f2 unlocked b-c re-bakes under bakeRestPose', bc.restLen, Math.sqrt(5), 1e-12);
+  checkTrue('T25f3 every node rest pose = current pose', s.nodes.every(n => n.rx === n.x && n.ry === n.y) && r3.kept === 1);
+  // and Reset brings the build back exactly to that pose
+  for (const n of s.nodes) { n.x += 7; }
+  reset(s);
+  checkTrue('T25f4 reset restores the baked pose', s.nodes.every(n => n.x === n.rx && n.y === n.ry));
 }
 
 console.log('');

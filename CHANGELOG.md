@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.15.0 - 2026-09-04
+
+Rest-length lock and "Rest = now". 146/146 tests.
+
+- Member flag `fixRest` ("Lock length" in the member panel, saved in the
+  file, survives copy/paste and hub splits). A locked member keeps its
+  tuned rest length when you move its nodes while paused, so the move
+  pre-stresses it instead of silently re-measuring it. Drawn as two
+  tick marks across the member.
+- "Rest = now" button on every member: the current length becomes the
+  rest length (actuators keep amp, so short / long scale with the new
+  mid). Works while running, so you can pose the build and then set it.
+- Group panel: "Rest = now (all touching)" does the same for every
+  member with an end in the group.
+- World panel: "Adopt pose as rest" (`bakeRestPose`) takes the whole
+  current pose as the build pose, honouring locks. Reset returns there.
+- Fix: dropping a moved GROUP left the members crossing the group
+  boundary at their OLD rest length, so Run yanked the group back.
+  Single-node and group drops now share one engine path,
+  `bakeNodes(state, ids)`, which re-bakes every touching unlocked
+  member (T25a-f4).
+
 ## 0.14.0 - 2026-09-03
 
 Inchworm and Catapult demos; phone layout pass. 129/129 tests.

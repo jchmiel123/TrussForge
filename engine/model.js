@@ -16,6 +16,13 @@
 // platforms out of anchored solid beams. Nodes of the member itself and
 // their direct neighbours never collide with it (no self-jamming).
 //
+// Member flag `fixRest` (default false): the rest length is LOCKED. When
+// the editor moves a node while paused it normally re-bakes every
+// attached member's rest length from the new geometry (bakeNodes); a
+// locked member keeps its tuned rest length instead, so the move
+// pre-stresses it. setRestFromCurrent() is the explicit "make the
+// current length the rest length" button, lock or not.
+//
 // Member kinds:
 //   beam     - rigid stick (hard distance constraint).
 //   spring   - passive, stiffness k + damping c (soft, force-based).
@@ -85,6 +92,7 @@ export function addMember(state, a, b, kind = 'beam', opts = {}) {
     a: na.id, b: nb.id,
     kind,
     solid: !!opts.solid,
+    fixRest: !!opts.fixRest,
     restLen: opts.restLen ?? restLen,
     k: opts.k ?? DEFAULTS.springK,
     c: opts.c ?? DEFAULTS.springC,
@@ -181,15 +189,49 @@ export function reset(state) {
   rebuildBraces(state);
 }
 
-// Adopt the CURRENT positions as the new build pose (used by the editor
-// after dragging nodes around while paused).
+// Adopt the CURRENT positions as the new build pose for the whole build.
+// Members with fixRest keep their rest length (they become pre-stressed
+// in the new pose); everything else re-bakes from the geometry.
 export function bakeRestPose(state) {
-  for (const n of state.nodes) { n.rx = n.x; n.ry = n.y; }
+  return bakeNodes(state, state.nodes.map(n => n.id));
+}
+
+// Adopt the CURRENT positions of the given nodes as their build pose and
+// re-bake the rest length of every member touching them - unless the
+// member is fixRest (locked), which keeps its tuned length. This is the
+// single "a paused drag ended" path for one node and for a group: with a
+// group move the members INSIDE the group keep their geometry anyway,
+// while the members crossing the boundary are the ones that changed.
+// Returns { baked, kept }: how many members were re-baked / left alone.
+export function bakeNodes(state, ids) {
+  const set = new Set(ids);
+  let baked = 0, kept = 0;
+  for (const n of state.nodes) {
+    if (set.has(n.id)) { n.rx = n.x; n.ry = n.y; }
+  }
   for (const m of state.members) {
+    if (!set.has(m.a) && !set.has(m.b)) continue;
+    if (m.fixRest) { kept++; continue; }
     const a = getNode(state, m.a), b = getNode(state, m.b);
-    m.restLen = Math.hypot(b.rx - a.rx, b.ry - a.ry);
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    if (L > 1e-6) { m.restLen = L; baked++; }
   }
   rebuildBraces(state);
+  return { baked, kept };
+}
+
+// Make the member's CURRENT length its rest length (the "Rest = now"
+// button). Works locked or not, paused or running. An actuator keeps its
+// amp, so short / long scale with the new mid length. Returns the new
+// rest length, or null if the ends coincide.
+export function setRestFromCurrent(state, m) {
+  const a = getNode(state, m.a), b = getNode(state, m.b);
+  if (!a || !b) return null;
+  const L = Math.hypot(b.x - a.x, b.y - a.y);
+  if (L < 1e-6) return null;
+  m.restLen = L;
+  rebuildBraces(state, true);
+  return L;
 }
 
 export function centroid(state) {
@@ -249,7 +291,7 @@ export function splitMember(state, memberId, x, y, opts = {}) {
   });
   // rest pose along the REST segment, so Reset keeps it on the beam
   n.rx = a.rx + t * (b.rx - a.rx); n.ry = a.ry + t * (b.ry - a.ry);
-  const common = { k: m.k, c: m.c, solid: m.solid, wave: m.wave ? { ...m.wave } : undefined };
+  const common = { k: m.k, c: m.c, solid: m.solid, fixRest: m.fixRest, wave: m.wave ? { ...m.wave } : undefined };
   const i = state.members.findIndex(x => x.id === m.id);
   state.members.splice(i, 1);
   const m1 = addMember(state, a, n, m.kind, { ...common, restLen: m.restLen * t });
@@ -319,6 +361,7 @@ export function extractSub(state, ids) {
   const members = state.members.filter(m => set.has(m.a) && set.has(m.b)).map(m => ({
     a: m.a, b: m.b, kind: m.kind, restLen: m.restLen,
     solid: m.solid || undefined,
+    fixRest: m.fixRest || undefined,
     k: m.kind === 'spring' ? m.k : undefined,
     c: m.kind === 'spring' ? m.c : undefined,
     wave: m.kind === 'actuator' ? { ...m.wave } : undefined,
@@ -351,7 +394,7 @@ export function insertSub(state, frag, dx = 0, dy = 0) {
   }
   for (const d of frag.members) {
     addMember(state, map.get(d.a), map.get(d.b), d.kind, {
-      restLen: d.restLen, k: d.k, c: d.c, wave: d.wave, solid: !!d.solid,
+      restLen: d.restLen, k: d.k, c: d.c, wave: d.wave, solid: !!d.solid, fixRest: !!d.fixRest,
     });
   }
   rebuildBraces(state);
@@ -397,8 +440,6 @@ export function serialize(state) {
     app: 'trussforge',
     version: 1,
     name: state.name || 'Untitled',
-    name: state.name || 'Untitled',
-    name: state.name || 'Untitled',
     world: { ...state.world },
     nodes: state.nodes.map(n => ({
       id: n.id, x: n.rx, y: n.ry,
@@ -409,6 +450,7 @@ export function serialize(state) {
     members: state.members.map(m => ({
       id: m.id, a: m.a, b: m.b, kind: m.kind,
       solid: m.solid || undefined,
+      fixRest: m.fixRest || undefined,
       restLen: m.restLen,
       k: m.kind === 'spring' ? m.k : undefined,
       c: m.kind === 'spring' ? m.c : undefined,
@@ -438,6 +480,7 @@ export function deserialize(doc) {
     const m = {
       id: d.id, a: d.a, b: d.b, kind: d.kind,
       solid: !!d.solid,
+      fixRest: !!d.fixRest,
       restLen: d.restLen,
       k: d.k ?? DEFAULTS.springK,
       c: d.c ?? DEFAULTS.springC,

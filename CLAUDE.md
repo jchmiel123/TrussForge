@@ -42,6 +42,14 @@ Everything in-house and dependency-free.
   Editing: `splitMember` (welded hub into a member, t in 5..95 %) and
   `mergeNodes` (drop into keep, self-links + duplicate edges removed,
   masses add, joint welded) - T20.
+  Rest length (0.15.0): member flag `fixRest` = the UI's **Lock length**.
+  `bakeNodes(state, ids)` is THE "paused drag ended" path (single node
+  AND group - app.js `bakeMoved`): rest pose follows the nodes, every
+  touching member re-measures its restLen unless fixRest. Do not go back
+  to per-node rebake loops in app.js: the group path once skipped the
+  crossing members and Run yanked the group back. `setRestFromCurrent`
+  = the **Rest = now** button (keeps actuator amp); `bakeRestPose` =
+  World panel **Adopt pose as rest** = bakeNodes over all nodes. T25.
 - `engine/sim.js` - `step(state, dt)` at FIXED_DT = 1/240:
   spring forces (soft, force-based - that is what makes the SHM
   frequency test exact) -> verlet integrate with gravity/drag ->
@@ -175,7 +183,8 @@ Everything in-house and dependency-free.
 
 ## To do (Justin's asks, keep this list)
 
-- (Chains 0.12.0, catapult + inchworm 0.14.0 shipped.) Nothing queued.
+- (Chains 0.12.0, catapult + inchworm 0.14.0, rest-length lock +
+  Rest = now 0.15.0 shipped.) Nothing queued.
 
 ## Conventions
 
