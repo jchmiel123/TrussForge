@@ -87,6 +87,12 @@ Everything in-house and dependency-free.
   touching the engine's contact code or the gait numbers.
 - `engine/lattice.js` - snap lattices (square, equilateral tri), pure
   geometry, T17.
+- `engine/shapes.js` - parametric fragments: `polygonShape` (wheel = hub
+  + spokes / ring), `boxShape`, `trussShape` (Warren), `shapeFragment(kind,
+  geom)` dispatcher. Nodes at ABSOLUTE coords -> `insertSub(state, f, 0,
+  0)`; members carry no restLen (geometry = rest). `frag.startIndex` =
+  the node at the drag start (hub / first corner) so the UI can merge it
+  into the node the drag began on. T26.
 - `tests/run-tests.js` - `node tests/run-tests.js`, exit 0 = pass.
 - `web/app.js` - board UI, organized with section banners. World y is UP
   in the engine; the renderer flips. `window.TF` console hooks (incl.
@@ -117,6 +123,19 @@ Everything in-house and dependency-free.
   - Project name: `state.name` (in the file); `#projName` input in the
     toolbar, `syncName()` after every state swap. Save = `saveToServer`
     (PUT /api/builds/<name>, download fallback); Open = `#libModal`.
+  - Shape tool (key O, `tool === 'shape'`): gesture `shape` {x0,y0 = snapped
+    start or the node under it, onNode}; `shapeGeom(g)` -> `shapeFragment`
+    -> `insertSub`; `finishShape` merges the start node in (restoring its
+    locked/mass: mergeNodes welds and adds mass) and selects the new group
+    while STAYING in the tool. A tap toggles `select('shape')` = the
+    settings panel (`renderShapeProps`, prefs.shape per device, `sides` /
+    `bays` on the pod). `drawGesture` ghosts the fragment.
+  - Parts: `insertDoc(doc, label)` = deserialize -> extractSub(all) ->
+    insertSub right of the build (or mid-view), never below ground, then
+    Group tool + selection (+ fitView if off screen). `saveGroupAsPart(ids)`
+    = extractSub -> temp state -> serialize (member ids assigned) -> PUT.
+    Library rows: Open (replace) + Insert (kit `actions`); `#libInsertFile`
+    shares `#openFile` via `fileMode`. Builds and parts are ONE library.
   - `DEMO_HINTS[name].view` = explicit fit box (catapult); `follow`
     turns the follow camera on (crawlers). `followCam()` is shared by
     frame() and TF.step so in-frame checks under TF.step are honest.
@@ -184,7 +203,9 @@ Everything in-house and dependency-free.
 ## To do (Justin's asks, keep this list)
 
 - (Chains 0.12.0, catapult + inchworm 0.14.0, rest-length lock +
-  Rest = now 0.15.0 shipped.) Nothing queued.
+  Rest = now 0.15.0, Shape tool + parts library 0.16.0 shipped.)
+  Nothing queued. Ideas not asked for: shapes as springs already work;
+  a "hollow wheel" (double rim) and gear teeth would be next if wanted.
 
 ## Conventions
 

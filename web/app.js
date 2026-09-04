@@ -10,13 +10,14 @@ import {
   splitMember, mergeNodes, chain,
   bakeNodes, bakeRestPose, setRestFromCurrent,
 } from '../engine/model.js';
+import { shapeFragment, SHAPE_KINDS } from '../engine/shapes.js';
 import { applyTheme, THEMES, themeNames } from './vendor/forgekit/theme.js';
 import { ValuePod } from './vendor/forgekit/pod.js';
 import { Prefs } from './vendor/forgekit/prefs.js';
 import { History } from './vendor/forgekit/history.js';
 import { fitCanvas } from './vendor/forgekit/canvas.js';
 import { modal } from './vendor/forgekit/modal.js';
-import { LibraryClient, renderLibrary, saveOrDownload } from './vendor/forgekit/library.js';
+import { LibraryClient, renderLibrary, saveOrDownload, validName, NAME_RULE } from './vendor/forgekit/library.js';
 import { downloadJSON, slug } from './vendor/forgekit/files.js';
 import { step, memberForce, FIXED_DT, WAVE_TYPES } from '../engine/sim.js';
 import { DEMOS, DEMO_HINTS } from '../engine/demos.js';
@@ -53,9 +54,12 @@ let strainOn = false;         // force view: color members by axial force
 
 // Grid / view preferences: per device (localStorage), NOT part of the
 // build file - open any save and change the lattice to suit it.
-const PREF_DEFAULTS = { theme: 'forge', gridType: 'square', pitch: 0.25, gridStyle: 'dots', gridBright: 0.5, gridSize: 2 };
+const SHAPE_DEFAULTS = { kind: 'wheel', sides: 8, brace: 'one', bays: 4, member: 'beam' };
+const PREF_DEFAULTS = { theme: 'forge', gridType: 'square', pitch: 0.25, gridStyle: 'dots', gridBright: 0.5, gridSize: 2, shape: SHAPE_DEFAULTS };
 const prefStore = new Prefs(PREFS_KEY, PREF_DEFAULTS);
 let prefs = prefStore.all();
+prefs.shape = { ...SHAPE_DEFAULTS, ...(prefs.shape || {}) };
+if (!SHAPE_KINDS.includes(prefs.shape.kind)) prefs.shape.kind = 'wheel';
 if (!PITCHES.includes(prefs.pitch)) prefs.pitch = PREF_DEFAULTS.pitch;
 if (!THEMES[prefs.theme]) prefs.theme = 'forge';
 // ForgeKit theme: CSS tokens for the chrome + a canvas palette for the board
@@ -469,6 +473,25 @@ function drawGesture() {
     ctx.setLineDash([]);
     return;
   }
+  if (gesture.type === 'shape') {
+    if (!gesture.moved) return;
+    const f = shapeFragment(prefs.shape.kind, shapeGeom(gesture));
+    if (!f) return;
+    const at = new Map(f.nodes.map(n => [n.id, n]));
+    ctx.strokeStyle = `rgb(${theme.canvas.select})`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([7, 6]);
+    ctx.beginPath();
+    for (const m of f.members) {
+      const a = at.get(m.a), b = at.get(m.b);
+      ctx.moveTo(sx(a.x), sy(a.y)); ctx.lineTo(sx(b.x), sy(b.y));
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = `rgba(${theme.canvas.select}, .7)`;
+    for (const n of f.nodes) { ctx.beginPath(); ctx.arc(sx(n.x), sy(n.y), 5, 0, 7); ctx.stroke(); }
+    return;
+  }
   if (gesture.type !== 'member') return;
   const a = gesture.from ? getNode(state, gesture.from) : { x: gesture.startX, y: gesture.startY };
   if (!a) return;
@@ -619,6 +642,11 @@ canvas.addEventListener('pointerdown', ev => {
     // tap = toggle weld; drag onto another node = merge the two
     pushUndo();
     gesture = { type: 'dragNode', id: n.id, moved: false, weld: true };
+  } else if (tool === 'shape') {
+    // the drag start is the wheel's hub / the box's first corner; starting
+    // ON a node builds the shape onto that node
+    const st = n ? { x: n.x, y: n.y } : snapPt(wx(p.sx), wy(p.sy));
+    gesture = { type: 'shape', x0: st.x, y0: st.y, onNode: n ? n.id : null, sx: p.sx, sy: p.sy, moved: false };
   } else if (tool === 'beam' || tool === 'spring' || tool === 'actuator' || tool === 'chain') {
     if (n) {
       gesture = { type: 'member', from: n.id, sx: p.sx, sy: p.sy };
@@ -682,6 +710,9 @@ canvas.addEventListener('pointermove', ev => {
     gesture.x1 = nx; gesture.y1 = ny;
   } else if (gesture.type === 'member') {
     gesture.sx = nx; gesture.sy = ny;
+  } else if (gesture.type === 'shape') {
+    gesture.sx = nx; gesture.sy = ny;
+    if (p.moved) gesture.moved = true;
   }
   if (!running) draw();
 });
@@ -700,6 +731,8 @@ function endPointer(ev) {
 
   if (g && g.type === 'member') {
     finishMember(g, p);
+  } else if (g && g.type === 'shape') {
+    finishShape(g);
   } else if (g && g.type === 'dragNode') {
     const dropTarget = g.moved && !g.addToGroup ? hitMember(p.sx, p.sy, g.id) : null;
     if (g.moved && g.weld) {
@@ -836,6 +869,81 @@ function finishMember(g, p) {
   markDirty();
 }
 
+// ---- Shape tool --------------------------------------------------------------
+// The drag defines the geometry; the engine (shapes.js) turns it into a
+// fragment; insertSub drops it in as a plain group. Settings (kind, sides,
+// bracing, bays, member kind) are per-device prefs shown in the Shape panel.
+
+const SHAPE_LABELS = { wheel: 'Wheel (rim + hub + spokes)', ring: 'Ring (rim only)', box: 'Box', truss: 'Truss (Warren)' };
+const BRACE_LABELS = { none: 'none (folds)', one: 'one diagonal', cross: 'cross (both)' };
+const SHAPE_DESC = {
+  wheel: 'Drag from the centre out. The hub + spokes make it a rigid disc that rolls. Start the drag on a node to put the hub there (an axle).',
+  ring: 'Drag from the centre out. Hinged links only: it squashes under load - use springs, or add spokes / bracing yourself.',
+  box: 'Drag corner to corner. One diagonal makes it rigid; none = a four-bar that folds.',
+  truss: 'Drag from one end of the bottom chord to the far end of the TOP chord: width = span, height = depth. Every panel is a triangle.',
+};
+
+// World geometry of the shape being dragged, sized to the grid when snapping
+function shapeGeom(g) {
+  const S = prefs.shape;
+  const t = snapPt(wx(g.sx), wy(g.sy));
+  if (S.kind === 'wheel' || S.kind === 'ring') {
+    let r = Math.hypot(t.x - g.x0, t.y - g.y0);
+    if (snapOn) r = Math.max(prefs.pitch, Math.round(r / prefs.pitch) * prefs.pitch);
+    return { cx: g.x0, cy: g.y0, r, sides: S.sides, kind: S.member };
+  }
+  if (S.kind === 'box') return { x0: g.x0, y0: g.y0, x1: t.x, y1: t.y, brace: S.brace, kind: S.member };
+  return { x0: g.x0, y0: g.y0, x1: t.x, y1: t.y, bays: S.bays, kind: S.member };
+}
+
+function finishShape(g) {
+  if (!g.moved) {                         // a tap: toggle the Shape panel
+    select(sel.kind === 'shape' ? null : 'shape');
+    return;
+  }
+  const frag = shapeFragment(prefs.shape.kind, shapeGeom(g));
+  if (!frag) { setStatus('Drag further out to size the shape.', true); if (!running) draw(); return; }
+  pushUndo();
+  const ids = insertSub(state, frag, 0, 0);
+  if (g.onNode && frag.startIndex !== undefined) {
+    // the drag began on an existing node: it becomes the hub / corner.
+    // mergeNodes welds and adds mass; the existing node keeps its own.
+    const host = getNode(state, g.onNode);
+    if (host) {
+      const { locked, mass } = host;
+      const keep = mergeNodes(state, host.id, ids[frag.startIndex]);
+      keep.locked = locked; keep.mass = mass;
+      ids[frag.startIndex] = keep.id;
+      rebuildBraces(state, running);
+    }
+  }
+  if (running) rebuildBraces(state, true);
+  markDirty();
+  select('group', ids);                   // stays in the Shape tool: drag another
+  const S = prefs.shape;
+  const what = S.kind === 'wheel' || S.kind === 'ring' ? `${S.sides}-sided ${S.kind}` : S.kind === 'truss' ? `${S.bays}-bay truss` : 'box';
+  setStatus(`Added a ${what} (${ids.length} nodes)${g.onNode ? ' onto the node you started from' : ''}. It is selected as a group: drag a node to move it, or Rest = now / Save as part in the panel.`);
+}
+
+function renderShapeProps() {
+  const S = prefs.shape;
+  const rows = [];
+  rows.push(`<div class="propTitle">Shape</div>`);
+  rows.push(`<p class="desc">Drag on the board to size and place it. Settings are per device, like the grid. Key <kbd>O</kbd>.</p>`);
+  rows.push(propSelect('skind', 'shape', SHAPE_KINDS, S.kind, o => SHAPE_LABELS[o]));
+  if (S.kind === 'wheel' || S.kind === 'ring') rows.push(propSlider('sides', 'sides', 3, 24, 1, S.sides, ''));
+  if (S.kind === 'box') rows.push(propSelect('brace', 'bracing', ['none', 'one', 'cross'], S.brace, o => BRACE_LABELS[o]));
+  if (S.kind === 'truss') rows.push(propSlider('bays', 'bays', 1, 12, 1, S.bays, ''));
+  rows.push(propSelect('smember', 'made of', ['beam', 'spring'], S.member));
+  rows.push(`<p class="desc">${SHAPE_DESC[S.kind]}</p>`);
+  propsBody.innerHTML = rows.join('');
+  wireSel('skind', v => { S.kind = v; savePrefs(); renderProps(); });
+  if (S.kind === 'wheel' || S.kind === 'ring') wireProp('sides', v => { S.sides = Math.round(v); savePrefs(); });
+  if (S.kind === 'box') wireSel('brace', v => { S.brace = v; savePrefs(); });
+  if (S.kind === 'truss') wireProp('bays', v => { S.bays = Math.round(v); savePrefs(); });
+  wireSel('smember', v => { S.member = v; savePrefs(); });
+}
+
 // Put a welded hub INTO a member at the tapped spot (splits it in two).
 function insertHub(m, px, py) {
   const t = snapPt(wx(px), wy(py));
@@ -933,6 +1041,7 @@ const TOOL_HINTS = {
   spring: 'Drag anywhere to add a stretchy spring. Start or end on a line to weld a hub into it.',
   actuator: 'Drag anywhere to add a muscle, then tap it to shape its wave. Start or end on a line to weld a hub into it.',
   chain: 'Drag to lay a chain: one link per grid pitch. Anchor an end, hang a weight, or drape it over a solid member.',
+  shape: 'Drag to size a wheel, ring, box or truss. Tap empty space for the shape settings. Start the drag on a node to build the shape onto it.',
   erase: 'Tap a node or member to delete it.',
 };
 
@@ -942,6 +1051,8 @@ function setTool(t) {
     el.classList.toggle('active', el.dataset.tool === t));
   toolHint = TOOL_HINTS[t] || '';
   setHint(toolHint);
+  if (t === 'shape' && sel.kind !== 'shape') select('shape');
+  else if (t !== 'shape' && sel.kind === 'shape') select(null);
 }
 document.querySelectorAll('.palItem').forEach(el =>
   el.addEventListener('pointerup', () => setTool(el.dataset.tool)));
@@ -1117,6 +1228,7 @@ const propsBody = $('propsBody');
 $('propsClose').addEventListener('click', () => {
   if (sel.kind === 'world') select(null);
   else if (sel.kind === 'grid') select(null);
+  else if (sel.kind === 'shape') select(null);
   else propsEl.classList.remove('open');
 });
 
@@ -1145,7 +1257,7 @@ const LEGEND_HTML = `
   <p><b>Group</b> tool: box-select nodes, then copy / paste / mirror / move them. "Select body" on a node or member grabs the whole creature.</p>
   <p><b>Force view</b> (<kbd>F</kbd>) colors members: <span style="color:#ff5648">red = tension</span>, <span style="color:#40a0ff">blue = compression</span>. Full color = carrying the whole build's weight.</p>
   <p class="keys"><kbd>Space</kbd> run <kbd>R</kbd> reset <kbd>G</kbd> snap <kbd>Ctrl+Z</kbd> undo<br>
-  <kbd>V</kbd> <kbd>M</kbd> <kbd>W</kbd> <kbd>N</kbd> <kbd>B</kbd> <kbd>S</kbd> <kbd>A</kbd> <kbd>C</kbd> <kbd>E</kbd> tools <kbd>Del</kbd> delete<br>
+  <kbd>V</kbd> <kbd>M</kbd> <kbd>W</kbd> <kbd>N</kbd> <kbd>B</kbd> <kbd>S</kbd> <kbd>A</kbd> <kbd>C</kbd> <kbd>O</kbd> <kbd>E</kbd> tools <kbd>Del</kbd> delete<br>
   <kbd>Ctrl+C</kbd> copy <kbd>Ctrl+V</kbd> paste <kbd>Ctrl+D</kbd> duplicate <kbd>Ctrl+A</kbd> all</p>
 </div>`;
 
@@ -1162,6 +1274,13 @@ const TIPS = {
   fixRest: 'Locked: moving a node no longer changes this rest length. The member keeps the length you tuned and pulls or pushes toward it. Unlocked (default): a paused move re-measures it.',
   restNow: 'Make the current length the rest length, right now. Works while running: pose the build, then tap.',
   restNowGroup: 'Every member touching the group takes its current length as rest length (locked ones too).',
+  skind: 'Wheel = rim + hub + spokes (rigid, rolls). Ring = rim only (hinged, squashes). Box = rectangle. Truss = Warren truss, N bays.',
+  sides: 'Rim nodes. More = rounder wheel, more members to simulate. 8-12 rolls nicely.',
+  brace: 'A diagonal makes the box rigid. Cross = both diagonals (they pass through each other). None = it folds.',
+  bays: 'Panels along the bottom chord. Each is one triangle.',
+  smember: 'What the shape is built from. Beams are rigid; springs stretch.',
+  insert: 'Add this saved build to the board as a part (a group you drag into place) instead of replacing what is there.',
+  savePart: 'Save just this group to the library as a build of its own, so you can Insert it into other projects.',
   bakePose: 'Adopt the current pose of the whole build as its rest pose: positions and unlocked rest lengths. Use it after the sim settles under gravity. Locked members keep their length.',
   k: 'How hard the spring pulls back per meter of stretch.',
   c: 'How fast the spring stops bouncing. 0 = rings forever.',
@@ -1253,6 +1372,12 @@ function podTargets() {
       { key: 'drag', label: 'air drag', min: 0, max: 2, step: 0.01, get: () => W.drag, set: v => { W.drag = v; } },
     ] };
   }
+  if (sel.kind === 'shape') {
+    const S = prefs.shape, T = [];
+    if (S.kind === 'wheel' || S.kind === 'ring') T.push({ key: 'sides', label: 'sides', min: 3, max: 24, step: 1, get: () => S.sides, set: v => { S.sides = Math.round(v); savePrefs(); } });
+    if (S.kind === 'truss') T.push({ key: 'bays', label: 'bays', min: 1, max: 12, step: 1, get: () => S.bays, set: v => { S.bays = Math.round(v); savePrefs(); } });
+    return T.length ? { title: 'Shape', targets: T } : null;
+  }
   if (sel.kind === 'grid') {
     return { title: 'View', targets: [
       { key: 'gbright', label: 'grid brightness', min: 0, max: 1, step: 0.05, get: () => prefs.gridBright, set: v => { prefs.gridBright = v; savePrefs(); } },
@@ -1279,7 +1404,7 @@ function refreshSliders() {
     const v = t.get();
     el.value = v;
     const pv = $('pv_' + t.key);
-    if (pv) pv.textContent = t.key === 'phase' ? fmtPhase(v) : fmtVal(v) + ' ' + (pv.dataset.unit || '');
+    if (pv) pv.textContent = fmtProp(t.key, v, pv.dataset.unit);
   }
   if (sel.kind === 'node') positionPill();
 }
@@ -1295,6 +1420,7 @@ function renderPropsInner() {
   $('gridBtn').classList.toggle('active', sel.kind === 'grid');
   if (sel.kind === 'world') { renderWorldProps(); openSheet(true); return; }
   if (sel.kind === 'grid') { renderGridProps(); openSheet(true); return; }
+  if (sel.kind === 'shape') { renderShapeProps(); openSheet(true); return; }
   // phone: node / member / group selections show the pod; "=" opens the sheet
   if (n) { renderNodeProps(n); openSheet(false); return; }
   if (sel.kind === 'group') { renderGroupProps(); openSheet(false); return; }
@@ -1409,7 +1535,7 @@ function renderGroupProps() {
   rows.push(`<p class="desc">${ids.length} node${ids.length === 1 ? '' : 's'}, ${mems.length} member${mems.length === 1 ? '' : 's'}${acts.length ? `, ${acts.length} muscle${acts.length === 1 ? '' : 's'}` : ''}. Drag a grouped node to move them all.</p>`);
   rows.push(`<div class="propBtns"><button id="gCopy" data-tip="${TIPS.copy}" title="${TIPS.copy}">Copy</button><button id="gPaste" data-tip="${TIPS.paste}" title="${TIPS.paste}">Paste</button></div>`);
   rows.push(`<div class="propBtns"><button id="gMirror" data-tip="${TIPS.mirror}" title="${TIPS.mirror}">Mirror</button><button id="gDel" class="danger">Delete</button></div>`);
-  rows.push(`<div class="propBtns"><button id="gRestNow" data-tip="${TIPS.restNowGroup}" title="${TIPS.restNowGroup}">Rest = now (all touching)</button></div>`);
+  rows.push(`<div class="propBtns"><button id="gRestNow" data-tip="${TIPS.restNowGroup}" title="${TIPS.restNowGroup}">Rest = now (all touching)</button><button id="gPart" data-tip="${TIPS.savePart}" title="${TIPS.savePart}">Save as part</button></div>`);
   if (acts.length) {
     rows.push(`<div class="propTitle" style="margin-top:10px">Muscles in group</div>`);
     rows.push(propSlider('gperiod', 'period (all)', 0.2, 4, 0.05, acts[0].wave.period, 's'));
@@ -1428,6 +1554,7 @@ function renderGroupProps() {
     if (!running) draw();
   });
   $('gDel').addEventListener('click', deleteGroup);
+  $('gPart').addEventListener('click', () => saveGroupAsPart(ids));
   $('gRestNow').addEventListener('click', () => {
     pushUndo();
     const touching = state.members.filter(m => gs.has(m.a) || gs.has(m.b));
@@ -1517,7 +1644,7 @@ function renderWorldProps() {
 function propSlider(id, label, min, max, stepv, val, unit) {
   const tip = TIPS[id] || '';
   return `<div class="propRow" data-tip="${tip}" title="${tip}">
-    <label for="pp_${id}">${label} <span class="pv" id="pv_${id}" data-unit="${unit}">${id === 'phase' ? fmtPhase(val) : fmtVal(val) + ' ' + unit}</span></label>
+    <label for="pp_${id}">${label} <span class="pv" id="pv_${id}" data-unit="${unit}">${fmtProp(id, val, unit)}</span></label>
     <input type="range" id="pp_${id}" min="${min}" max="${max}" step="${stepv}" value="${val}"></div>`;
 }
 function propSelect(id, label, opts, val, show = o => o) {
@@ -1533,7 +1660,7 @@ function wireProp(id, fn) {
   el.addEventListener('input', () => {
     const v = parseFloat(el.value);
     const pv = $('pv_' + id);
-    pv.textContent = id === 'phase' ? fmtPhase(v) : fmtVal(v) + ' ' + pv.dataset.unit;
+    pv.textContent = fmtProp(id, v, pv.dataset.unit);
     fn(v);
     pod.refresh();
     markDirty();
@@ -1545,6 +1672,10 @@ function wireSel(id, fn) {
   el.addEventListener('change', () => { pushUndo(); fn(el.value); markDirty(); if (!running) draw(); });
 }
 const fmtVal = v => (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2));
+const COUNT_KEYS = new Set(['sides', 'bays']);
+// one formatter for the panel readouts: phase as a fraction, counts as
+// integers, everything else two decimals + unit
+const fmtProp = (id, v, unit) => (id === 'phase' ? fmtPhase(v) : COUNT_KEYS.has(id) ? String(Math.round(v)) : fmtVal(v) + ' ' + (unit || ''));
 // phase detents are 1/24 of a cycle: show the reduced fraction + degrees
 function fmtPhase(v) {
   let k = Math.round(v * 24), d = 24;
@@ -1700,6 +1831,7 @@ window.addEventListener('keydown', ev => {
   else if (k === 's') setTool('spring');
   else if (k === 'a') setTool('actuator');
   else if (k === 'e') setTool('erase');
+  else if (k === 'o') setTool('shape');
   else if (k === 'escape') select(null);   // a modal's Escape is handled (and stopped) by ForgeKit
   else if (k === 'delete' || k === 'backspace') {
     if (selectedNode()) deleteSelectedNode();
@@ -1741,6 +1873,58 @@ async function saveToServer() {
   else setStatus(`Server unreachable (${r.error.message}) - downloaded ${r.filename} instead.`, true);
 }
 
+// ---- parts: a saved build inserted INTO the current one -------------------------
+
+// Save just these nodes (and the members among them) as a build of its
+// own, so it shows up in the library and can be inserted anywhere.
+async function saveGroupAsPart(ids) {
+  const base = state.name && state.name !== 'Untitled' ? `${state.name} part` : 'part';
+  const name = (window.prompt('Name for this part (it goes in the library next to the builds):', base) || '').trim();
+  if (!name) return;
+  if (!validName(name)) { setStatus(`Bad name: ${NAME_RULE}.`, true); return; }
+  const frag = extractSub(state, ids);
+  const t = createState();
+  insertSub(t, frag, 0, 0);               // rest pose, member ids assigned
+  t.name = name.slice(0, 64);
+  t.world = { ...state.world };
+  const doc = serialize(t);
+  doc.savedAt = new Date().toISOString();
+  const r = await saveOrDownload(lib, name, doc, { fallback: 'trussforge-part' });
+  if (r.where === 'server') setStatus(`Saved part "${r.result.name}" (${r.result.nodes} nodes, ${r.result.members} members). Open > Insert puts it on any board.`);
+  else setStatus(`Server unreachable (${r.error.message}) - downloaded ${r.filename} instead.`, true);
+}
+
+// Drop a saved build onto the board as a group: right of the current
+// build if that is on screen, else mid-view; never below ground. The
+// user then drags it into place and joins it (Weld tool: drag a node onto
+// a node, or draw members to it).
+function insertDoc(doc, label) {
+  let next;
+  try { next = deserialize(doc); } catch (e) { setStatus('Not a TrussForge build: ' + e.message, true); return; }
+  if (!next.nodes.length) { setStatus('That build is empty.', true); return; }
+  const frag = extractSub(next, next.nodes.map(n => n.id));
+  const b = fragmentBounds(frag);
+  const onScreen = state.nodes.some(n => sx(n.x) > 0 && sx(n.x) < vw && sy(n.y) > 0 && sy(n.y) < vh);
+  let dx, dy;
+  if (onScreen) {
+    let x1 = -Infinity, ymin = Infinity;
+    for (const n of state.nodes) { x1 = Math.max(x1, n.x); ymin = Math.min(ymin, n.y); }
+    dx = x1 + 0.5 - b.x0; dy = Math.max(0, ymin) - b.y0;      // same footing as the build
+  } else { dx = wx(vw / 2) - b.cx; dy = wy(vh / 2) - b.cy; }
+  if (b.y0 + dy < 0) dy = -b.y0;
+  if (snapOn) { const v = snapVec(dx, dy); dx = v.x; dy = v.y; }
+  pushUndo();
+  const ids = insertSub(state, frag, dx, dy);
+  if (running) rebuildBraces(state, true);
+  markDirty();
+  setTool('group');
+  select('group', ids);
+  const off = ids.some(id => { const n = getNode(state, id); return sx(n.x) < 0 || sx(n.x) > vw || sy(n.y) < 0 || sy(n.y) > vh; });
+  if (off) fitView();
+  setStatus(`Inserted "${label}" as a group (${ids.length} nodes). Drag a grouped node to place it; join it with the Weld tool (drag a node onto a node) or draw members to it.`);
+  if (!running) draw();
+}
+
 function adoptState(next, label) {
   pushUndo();
   state = next;
@@ -1760,10 +1944,13 @@ function closeLibrary() { libModal.close(); }
 function refreshLibrary() {
   return renderLibrary($('libList'), {
     client: lib, current: state.name, hintEl: $('libHint'),
-    emptyText: 'Nothing saved yet. Name your build (click the title) and press Save.',
+    emptyText: 'Nothing saved yet. Name your build (click the title) and press Save, or Save as part from a group.',
     unreachableText: 'Server library unreachable - you can still open or download files',
+    reachableText: 'Open replaces the board. Insert adds the build as a part you drag into place.',
+    loadLabel: 'Open',
     meta: b => `${b.nodes} nodes, ${b.members} members`,
     onLoad: (doc, b) => { adoptState(deserialize(doc), `Opened "${b.name}" from the server.`); closeLibrary(); },
+    actions: [{ label: 'Insert', title: TIPS.insert, onPick: (doc, b) => { insertDoc(doc, b.name); closeLibrary(); } }],
     onError: m => setStatus(m, true),
   });
 }
@@ -1771,15 +1958,19 @@ $('saveBtn').addEventListener('click', saveToServer);
 $('openBtn').addEventListener('click', openLibrary);
 $('libClose').addEventListener('click', closeLibrary);
 $('libDownload').addEventListener('click', () => { downloadFile(); });
-$('libOpenFile').addEventListener('click', () => $('openFile').click());
+let fileMode = 'open';                 // what the next picked file does
+$('libOpenFile').addEventListener('click', () => { fileMode = 'open'; $('openFile').click(); });
+$('libInsertFile').addEventListener('click', () => { fileMode = 'insert'; $('openFile').click(); });
 $('openFile').addEventListener('change', async ev => {
   const f = ev.target.files[0];
   ev.target.value = '';
   if (!f) return;
   try {
     const doc = JSON.parse(await f.text());
+    const label = f.name.replace(/\.json$/i, '').slice(0, 64) || 'Untitled';
+    if (fileMode === 'insert') { insertDoc(doc, doc.name || label); closeLibrary(); return; }
     const next = deserialize(doc);
-    if (!doc.name) next.name = f.name.replace(/\.json$/i, '').slice(0, 64) || 'Untitled';
+    if (!doc.name) next.name = label;
     adoptState(next, `Opened ${f.name}.`);
     closeLibrary();
   } catch (e) {
@@ -1959,6 +2150,8 @@ window.TF = {
   pod,
   insertHub, mergeInto,
   bakeNodes: ids => bakeNodes(state, ids), bakeRestPose: () => bakeRestPose(state),
+  insertDoc, saveGroupAsPart, shapeFragment,
+  addShape: (kind, geom) => { const f = shapeFragment(kind, geom); if (!f) return null; pushUndo(); const ids = insertSub(state, f, 0, 0); markDirty(); select('group', ids); return ids; },
   setRestFromCurrent: m => setRestFromCurrent(state, typeof m === 'object' ? m : getMember(state, m)),
   set prefs(p) { prefs = { ...prefs, ...p }; savePrefs(); draw(); },
   snapPt,

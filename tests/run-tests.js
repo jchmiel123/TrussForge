@@ -12,6 +12,7 @@ import {
 import { step, run, waveValue, targetLength, memberForce, FIXED_DT, CONTACT_R } from '../engine/sim.js';
 import { walker, hopper, bridge, merry, chainDemo, inchworm, catapult } from '../engine/demos.js';
 import { snapToLattice, forEachLatticePoint, rowHeight } from '../engine/lattice.js';
+import { shapeFragment, polygonShape, boxShape, trussShape, SHAPE_KINDS } from '../engine/shapes.js';
 
 let pass = 0, fail = 0;
 function check(name, got, want, tol) {
@@ -866,6 +867,92 @@ function measurePeriod(state, signal, seconds) {
   for (const n of s.nodes) { n.x += 7; }
   reset(s);
   checkTrue('T25f4 reset restores the baked pose', s.nodes.every(n => n.x === n.rx && n.y === n.ry));
+}
+
+// ---- T26: shapes ------------------------------------------------------------
+// Closed forms: regular polygon side = 2 r sin(pi / n); Warren truss member
+// count 4 * bays - 1; box diagonal = hypot(w, h).
+{
+  const dist = (p, q) => Math.hypot(q.x - p.x, q.y - p.y);
+  const byId = f => new Map(f.nodes.map(n => [n.id, n]));
+
+  // a) wheel: n rim nodes + hub, 2n members, every rim node at radius r,
+  //    every rim edge = 2 r sin(pi / n), startIndex points at the hub
+  const w8 = shapeFragment('wheel', { cx: 1, cy: 2, r: 0.5, sides: 8 });
+  const m8 = byId(w8);
+  checkTrue('T26a wheel = 9 nodes, 16 members', w8.nodes.length === 9 && w8.members.length === 16);
+  const rim = w8.members.slice(0, 8).map(m => dist(m8.get(m.a), m8.get(m.b)));
+  check('T26a2 wheel rim edge = 2 r sin(pi/8)', Math.max(...rim), 2 * 0.5 * Math.sin(Math.PI / 8), 1e-12);
+  check('T26a3 wheel rim edge (min) = same', Math.min(...rim), 2 * 0.5 * Math.sin(Math.PI / 8), 1e-12);
+  const hub = w8.nodes[w8.startIndex];
+  checkTrue('T26a4 startIndex is the hub at the centre', hub.x === 1 && hub.y === 2);
+  checkTrue('T26a5 spokes all length r', w8.members.slice(8).every(m => Math.abs(dist(m8.get(m.a), m8.get(m.b)) - 0.5) < 1e-12));
+  // an even-sided wheel has an EDGE at the bottom (sits flat): the two
+  // lowest nodes share y = cy - r cos(pi/n)
+  const ys = w8.nodes.slice(0, 8).map(n => n.y).sort((a, b) => a - b);
+  check('T26a6 flat bottom edge: lowest y = cy - r cos(pi/8)', ys[0], 2 - 0.5 * Math.cos(Math.PI / 8), 1e-12);
+  check('T26a7 two nodes share that lowest y', ys[1], ys[0], 1e-12);
+
+  // b) ring = same rim, no hub, no startIndex
+  const r6 = shapeFragment('ring', { cx: 0, cy: 0, r: 1, sides: 6 });
+  checkTrue('T26b ring = 6 nodes, 6 members, no startIndex', r6.nodes.length === 6 && r6.members.length === 6 && r6.startIndex === undefined);
+  check('T26b2 hexagon side = r', dist(byId(r6).get(1), byId(r6).get(2)), 1, 1e-12);
+  checkTrue('T26b3 too small / bad kind -> null', shapeFragment('ring', { cx: 0, cy: 0, r: 0 }) === null && shapeFragment('blob', {}) === null);
+  checkTrue('T26b4 sides clamp to 3..64', polygonShape({ cx: 0, cy: 0, r: 1, sides: 1, hub: false }).nodes.length === 3 && polygonShape({ cx: 0, cy: 0, r: 1, sides: 99, hub: false }).nodes.length === 64);
+
+  // c) box: 4 corners, 4 sides + bracing, diagonal = hypot(w, h)
+  const bx = shapeFragment('box', { x0: 0, y0: 1, x1: 2, y1: 2.5, brace: 'one' });
+  checkTrue('T26c box (one brace) = 4 nodes, 5 members', bx.nodes.length === 4 && bx.members.length === 5);
+  const d = bx.members[4];
+  check('T26c2 box diagonal = hypot(2, 1.5)', dist(byId(bx).get(d.a), byId(bx).get(d.b)), 2.5, 1e-12);
+  checkTrue('T26c3 cross = 6, none = 4, zero width = null',
+    boxShape({ x0: 0, y0: 0, x1: 1, y1: 1, brace: 'cross' }).members.length === 6 &&
+    boxShape({ x0: 0, y0: 0, x1: 1, y1: 1, brace: 'none' }).members.length === 4 &&
+    boxShape({ x0: 0, y0: 0, x1: 0, y1: 1 }) === null);
+  checkTrue('T26c4 box node 1 is the first corner given', bx.nodes[bx.startIndex].x === 0 && bx.nodes[bx.startIndex].y === 1);
+
+  // d) truss: bays + 1 bottom nodes, bays top nodes, 4 bays - 1 members
+  for (const nb of [1, 4, 7]) {
+    const t = shapeFragment('truss', { x0: 0, y0: 1, x1: 4, y1: 1.6, bays: nb });
+    checkTrue(`T26d truss ${nb} bays = ${2 * nb + 1} nodes, ${4 * nb - 1} members`, t.nodes.length === 2 * nb + 1 && t.members.length === 4 * nb - 1);
+  }
+  const t4 = shapeFragment('truss', { x0: 0, y0: 1, x1: 4, y1: 1.6, bays: 4 });
+  const mt = byId(t4);
+  check('T26d2 truss bay = span / bays', dist(mt.get(1), mt.get(2)), 1, 1e-12);
+  check('T26d3 top node over bay midpoint at height h', mt.get(6).x * 10 + mt.get(6).y, 0.5 * 10 + 1.6, 1e-12);
+  checkTrue('T26d4 diagonals equal length (Warren)', (() => {
+    const L = t4.members.slice(7).map(m => dist(mt.get(m.a), mt.get(m.b)));
+    return Math.max(...L) - Math.min(...L) < 1e-12 && Math.abs(L[0] - Math.hypot(0.5, 0.6)) < 1e-12;
+  })());
+
+  // e) the fragments load through insertSub and BEHAVE: a wheel dropped on
+  //    the ground under gravity stays a disc (every rim node within 1 % of
+  //    r from the hub after 2 s); the same-size ring squashes (> 10 %)
+  const settle = (shape) => {
+    const s = createState();
+    const f = shapeFragment(shape, { cx: 0, cy: 0.55, r: 0.5, sides: 8 });
+    const ids = insertSub(s, f, 0, 0);
+    for (let i = 0; i < 2 / dt; i++) step(s, dt);
+    const c = centroid(s);
+    const rimIds = ids.slice(0, 8);
+    const rs = rimIds.map(id => { const n = getNode(s, id); return Math.hypot(n.x - c.x, n.y - c.y); });
+    return { dev: Math.max(...rs.map(r => Math.abs(r - 0.5))) / 0.5, finite: s.nodes.every(n => Number.isFinite(n.x) && Number.isFinite(n.y)), ids };
+  };
+  const wheel = settle('wheel'), ring = settle('ring');
+  checkTrue('T26e wheel on the ground stays round (< 1 % radius error)', wheel.finite && wheel.dev < 0.01, `dev=${fmt(100 * wheel.dev)}%`);
+  checkTrue('T26e2 hinged ring squashes (> 10 %)', ring.finite && ring.dev > 0.10, `dev=${fmt(100 * ring.dev)}%`);
+  checkTrue('T26e3 insertSub returns ids in fragment order (hub last)', wheel.ids.length === 9);
+
+  // f) truss anchored at both bottom ends, off the ground: rigid beams,
+  //    the mid-span sag after 3 s is under 5 mm and nothing blows up
+  const s = createState();
+  const tf = shapeFragment('truss', { x0: 0, y0: 1, x1: 4, y1: 1.6, bays: 4 });
+  const tids = insertSub(s, tf, 0, 0);
+  getNode(s, tids[0]).pinned = true; getNode(s, tids[4]).pinned = true;
+  const midY0 = getNode(s, tids[2]).y;
+  for (let i = 0; i < 3 / dt; i++) step(s, dt);
+  checkTrue('T26f anchored truss holds its shape (sag < 5 mm)', Math.abs(getNode(s, tids[2]).y - midY0) < 0.005 && s.nodes.every(n => Number.isFinite(n.y)), `sag=${fmt(1000 * (midY0 - getNode(s, tids[2]).y))} mm`);
+  checkTrue('T26g SHAPE_KINDS lists the four shapes', SHAPE_KINDS.join() === 'wheel,ring,box,truss');
 }
 
 console.log('');

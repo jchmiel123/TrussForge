@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.16.0 - 2026-09-04
+
+Shape tool and a parts library. 172/172 tests; ForgeKit 0.5.1.
+
+- Shape tool (O): drag to size a Wheel (rim + hub + spokes: a rigid disc
+  that rolls), Ring (rim only, hinged), Box (one / cross / no diagonal)
+  or Warren Truss (N bays). Ghost preview while dragging; the radius
+  snaps to grid pitch multiples; even-sided wheels get a flat edge at the
+  bottom. Start the drag on an existing node and the shape is built onto
+  it (wheel hub on an axle; the node keeps its weld and mass). Settings
+  (kind, sides, bracing, bays, beam / spring) are per-device prefs in
+  the Shape panel (tap empty space with the tool) and on the dial.
+  `engine/shapes.js` is headless: T26 checks polygon side = 2 r sin(pi/n),
+  truss member count 4 bays - 1, and that a wheel dropped on the ground
+  stays round while a ring squashes 58 %.
+- Parts: any saved build can be INSERTED onto the current board as a
+  group (library rows now have Open and Insert; "Insert file..." for a
+  .json on the device). It lands right of the build, or mid-view, never
+  below ground, and is selected in the Group tool so you drag it into
+  place and join it (Weld tool: node onto node, or draw members to it).
+  Group panel "Save as part" saves just the selection as a build of its
+  own (prompt for a name), so one library holds builds and parts alike.
+- ForgeKit 0.5.1 vendored: `renderLibrary({ actions })` extra per-row
+  buttons (the Insert button).
+- Count sliders (sides, bays) read out as integers (`fmtProp`).
+
 ## 0.15.0 - 2026-09-04
 
 Rest-length lock and "Rest = now". 146/146 tests.

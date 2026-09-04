@@ -73,7 +73,12 @@ export async function renderLibrary(listEl, {
   emptyText = 'Nothing saved yet.', reachableText = 'Saved on the server - the same list on every device.',
   unreachableText = 'Server library unreachable',
   loadLabel = 'Load', delLabel = 'Del', confirmLabel = 'sure?', confirmMs = 2500,
+  actions = [],
 } = {}) {
+  // actions: extra per-row buttons between Load and Del, e.g. an "Insert"
+  // that merges the document into the current one instead of replacing it:
+  //   [{ label: 'Insert', title: '...', onPick: (doc, row) => ... }]
+  // The document is fetched first unless the action sets needsDoc: false.
   const hint = m => { if (hintEl) hintEl.textContent = m; };
   const fail = m => { if (onError) onError(m); };
   listEl.innerHTML = '<p class="fk-modal-hint">loading...</p>';
@@ -101,6 +106,19 @@ export async function renderLibrary(listEl, {
       try { const doc = await client.get(row.name); if (onLoad) onLoad(doc, row); }
       catch (e) { fail(e.message); }
     });
+    const actBs = actions.map(act => {
+      const b = document.createElement('button');
+      b.textContent = act.label;
+      if (act.title) b.title = act.title;
+      b.disabled = !!row.corrupt;
+      b.addEventListener('click', async () => {
+        try {
+          const doc = act.needsDoc === false ? null : await client.get(row.name);
+          if (act.onPick) act.onPick(doc, row);
+        } catch (e) { fail(e.message); }
+      });
+      return b;
+    });
     const delB = document.createElement('button'); delB.textContent = delLabel; delB.className = 'fk-danger';
     delB.addEventListener('click', async () => {
       if (delB.textContent === delLabel) {           // two-tap confirm, phone-friendly
@@ -111,7 +129,7 @@ export async function renderLibrary(listEl, {
       try { await client.remove(row.name); div.remove(); if (!listEl.children.length) listEl.innerHTML = `<p class="fk-modal-hint">${emptyText}</p>`; }
       catch (e) { fail(e.message); }
     });
-    div.append(nm, mt, loadB, delB);
+    div.append(nm, mt, loadB, ...actBs, delB);
     listEl.appendChild(div);
   }
   return rows;
