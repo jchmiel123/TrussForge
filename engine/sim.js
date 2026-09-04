@@ -170,6 +170,7 @@ export function step(state, dt = FIXED_DT) {
       const a = getNode(state, m.a), b = getNode(state, m.b);
       if (!a || !b) continue;
       m._lam += relax(a, b, targetLength(m, t, W.actuatorRamp), 1);
+      m._len = Math.hypot(b.x - a.x, b.y - a.y);
     }
     for (const br of state.braces) {
       const a = getNode(state, br.a), b = getNode(state, br.b);
@@ -195,6 +196,11 @@ export function step(state, dt = FIXED_DT) {
   const invDt2 = 1 / (dt * dt);
   for (const m of state.members) {
     if (m.kind !== 'spring') m._f = m._lam * invDt2;
+  }
+
+  // --- 3b. actuators that FEEL their load (wave.feelOn) ---------------------
+  for (const m of state.members) {
+    if (m.kind === 'actuator' && m.wave && m.wave.feelOn) feelStep(m, t, W.actuatorRamp, dt);
   }
 
   // --- 4b. solid-member contact response (same rules as the ground) --------
@@ -239,6 +245,46 @@ export function step(state, dt = FIXED_DT) {
     }
   }
   return state;
+}
+
+// Force-feel: the muscle finds the stroke its mechanism allows. Each step,
+// if |axial force| is over the cap (wave.feelF, N), the limit on the side
+// the wave is currently driving toward moves TOWARD THE LENGTH THE MUSCLE
+// ACTUALLY REACHED (less a small margin) - that length is where the wall
+// is - with a ~0.3 s time constant. A fixed back-off rate was wrong: a
+// crank pin parked at dead centre keeps the force high for the rest of
+// the half-cycle, and the stroke ratcheted to nothing. When the force is
+// under half the cap the same limit creeps back out slowly, so the stroke
+// rides just under the cap. A crank that can only accept a 0.7..1.3 m
+// stroke pulls a 0.5..1.5 m muscle onto those numbers (T27). Needs some
+// asymmetry (gravity) to leave a dead centre - every real build has it.
+// The file keeps restLen + amp (lo = rest(1-amp), hi = rest(1+amp)), so
+// both are rebuilt from the new lo / hi. Returns true when it changed.
+export const FEEL_APPROACH = 3;     // 1/s: rate the limit closes on the reached length
+export const FEEL_MARGIN = 0.02;    // stop 2 % short of the wall
+export const FEEL_CREEP = 0.03;     // fraction per second when under half the cap
+export const FEEL_MAX_AMP = 0.45;   // the panel's ceiling: creep stops here
+export function feelStep(m, t, ramp, dt) {
+  const w = m.wave;
+  const cap = Math.max(0.1, w.feelF || 30);
+  const f = Math.abs(m._f || 0);
+  const over = f > cap, easy = f < 0.5 * cap && w.amp < FEEL_MAX_AMP;
+  if (!over && !easy) return false;
+  let lo = m.restLen * (1 - w.amp), hi = m.restLen * (1 + w.amp);
+  const longSide = targetLength(m, t, ramp) >= m.restLen;
+  if (over) {
+    const len = m._len;                              // measured this step (relax loop)
+    if (!(len > 0)) return false;
+    const k = Math.min(1, FEEL_APPROACH * dt);
+    if (longSide) hi += (len * (1 - FEEL_MARGIN) - hi) * k;
+    else lo += (len * (1 + FEEL_MARGIN) - lo) * k;
+  } else if (longSide) hi *= 1 + FEEL_CREEP * dt;
+  else lo *= 1 - FEEL_CREEP * dt;
+  lo = Math.max(0.03, lo);
+  hi = Math.max(lo + 0.02, hi);
+  m.restLen = (lo + hi) / 2;
+  w.amp = Math.min(FEEL_MAX_AMP, (hi - lo) / (hi + lo));
+  return true;
 }
 
 // Target length of a weld brace right now: law of cosines over the two

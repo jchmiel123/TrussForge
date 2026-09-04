@@ -9,7 +9,7 @@ import {
   splitMember, mergeNodes, membersAt, getMember, chain,
   bakeNodes, bakeRestPose, setRestFromCurrent,
 } from '../engine/model.js';
-import { step, run, waveValue, targetLength, memberForce, FIXED_DT, CONTACT_R } from '../engine/sim.js';
+import { step, run, waveValue, targetLength, memberForce, FIXED_DT, CONTACT_R, feelStep, FEEL_MAX_AMP } from '../engine/sim.js';
 import { walker, hopper, bridge, merry, chainDemo, inchworm, catapult } from '../engine/demos.js';
 import { snapToLattice, forEachLatticePoint, rowHeight } from '../engine/lattice.js';
 import { shapeFragment, polygonShape, boxShape, trussShape, SHAPE_KINDS } from '../engine/shapes.js';
@@ -953,6 +953,57 @@ function measurePeriod(state, signal, seconds) {
   for (let i = 0; i < 3 / dt; i++) step(s, dt);
   checkTrue('T26f anchored truss holds its shape (sag < 5 mm)', Math.abs(getNode(s, tids[2]).y - midY0) < 0.005 && s.nodes.every(n => Number.isFinite(n.y)), `sag=${fmt(1000 * (midY0 - getNode(s, tids[2]).y))} mm`);
   checkTrue('T26g SHAPE_KINDS lists the four shapes', SHAPE_KINDS.join() === 'wheel,ring,box,truss');
+}
+
+// ---- T27: actuator force-feel ------------------------------------------------
+// Crank: pivot P anchored at (0, 1), crank pin C on a 0.3 m beam, anchor A
+// at (-1, 1). |AC| can only range over |AP| - r .. |AP| + r = 0.7 .. 1.3 m.
+// A muscle A-C asking for 0.5 .. 1.5 jams at both ends; with feel on, its
+// limits must settle onto the geometry. Expected numbers are pure
+// geometry, not read from the engine.
+{
+  // Gravity stays ON: a crank pin parked at dead centre needs some
+  // asymmetry to leave it (an in-line crank with no gravity is a true
+  // singularity - the two collinear constraints fight forever).
+  const s = createState();
+  const P = addNode(s, 0, 1, { pinned: true });
+  const th = Math.acos(-0.15);                          // |AC| = 1.0 exactly at this crank angle
+  const C = addNode(s, 0.3 * Math.cos(th), 1 + 0.3 * Math.sin(th));
+  const A = addNode(s, -1, 1, { pinned: true });
+  addMember(s, P.id, C.id, 'beam');
+  const act = addMember(s, A.id, C.id, 'actuator', { restLen: 1.0, wave: { type: 'sine', amp: 0.5, period: 2, feelOn: true, feelF: 30 } });
+  check('T27a starts asking 0.5 .. 1.5', act.restLen * (1 + act.wave.amp), 1.5, 1e-12);
+  let fMax = 0;
+  const N = Math.round(12 / dt);
+  for (let i = 0; i < N; i++) {
+    step(s, dt);
+    if (i > N - 2 / dt) fMax = Math.max(fMax, Math.abs(memberForce(act)));
+  }
+  const lo = act.restLen * (1 - act.wave.amp), hi = act.restLen * (1 + act.wave.amp);
+  checkTrue('T27b long limit inside the crank maximum 1.3 m, creeping up to it', hi > 1.10 && hi < 1.32, `hi=${fmt(hi)}`);
+  checkTrue('T27c short limit inside the crank minimum 0.7 m, creeping down to it', lo > 0.68 && lo < 0.86, `lo=${fmt(lo)}`);
+  checkTrue('T27d it keeps working the crank (stroke > 0.3 m)', hi - lo > 0.3, `stroke=${fmt(hi - lo)}`);
+  checkTrue('T27e riding level: peak force in the last 2 s under the 30 N cap', fMax < 30, `fMax=${fmt(fMax)} N`);
+  checkTrue('T27e2 everything finite', s.nodes.every(n => Number.isFinite(n.x) && Number.isFinite(n.y)));
+
+  // an unloaded muscle (two free masses, no gravity) feels nothing: the
+  // limits creep OUT toward the panel ceiling instead of shrinking
+  const u = createState(); u.world.gravityOn = false;
+  const a = addNode(u, 0, 1), b = addNode(u, 1, 1);
+  const m = addMember(u, a.id, b.id, 'actuator', { wave: { amp: 0.2, period: 1.2, feelOn: true, feelF: 30 } });
+  for (let i = 0; i < 10 / dt; i++) step(u, dt);
+  checkTrue('T27f unloaded muscle creeps out (amp grows), capped at 0.45', m.wave.amp > 0.3 && m.wave.amp <= FEEL_MAX_AMP + 1e-9, `amp=${fmt(m.wave.amp)}`);
+
+  // feelStep is a no-op below the cap when already at the ceiling, and
+  // feel settings round-trip through the file
+  const q = createState(); const q1 = addNode(q, 0, 0), q2 = addNode(q, 1, 0);
+  const qm = addMember(q, q1.id, q2.id, 'actuator', { wave: { amp: 0.45, feelOn: true, feelF: 50 } });
+  qm._f = 1;
+  checkTrue('T27g at the amp ceiling with low force: nothing changes', feelStep(qm, 0.3, 0, dt) === false && qm.wave.amp === 0.45);
+  const q3 = deserialize(serialize(q));
+  checkTrue('T27h feelOn / feelF saved with the wave', q3.members[0].wave.feelOn === true && q3.members[0].wave.feelF === 50);
+  const old = deserialize({ app: 'trussforge', nodes: [{ id: 1, x: 0, y: 0 }, { id: 2, x: 1, y: 0 }], members: [{ id: 3, a: 1, b: 2, kind: 'actuator', restLen: 1, wave: { amp: 0.2 } }] });
+  checkTrue('T27i pre-feel files load with feel off, cap 30', old.members[0].wave.feelOn === false && old.members[0].wave.feelF === 30);
 }
 
 console.log('');

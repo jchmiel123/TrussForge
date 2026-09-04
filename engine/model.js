@@ -39,7 +39,7 @@ export const CHAIN_NODE_MASS = 0.1; // per intermediate node, kg
 export const DEFAULTS = {
   springK: 60,        // N/m-ish (world units are meters, masses ~1 kg)
   springC: 1.5,       // damping N*s/m
-  wave: { type: 'sine', amp: 0.2, period: 1.2, phase: 0, duty: 0.5 },
+  wave: { type: 'sine', amp: 0.2, period: 1.2, phase: 0, duty: 0.5, feelOn: false, feelF: 30 },
   nodeMass: 1,
 };
 

@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.17.0 - 2026-09-04
+
+Tools hand back to Select, Reset restores the camera, muscles can feel
+their load. 182/182 tests.
+
+- Tools return to Select after a construction action: a member drawn, a
+  node placed, a hub inserted, a weld toggled or merged. Erase and Group
+  stay. Shapes and pastes ALWAYS land in the Group tool (positioning is
+  the next move; a Shape-tool drag on a node would start another shape).
+  View panel toggle "Tools stay selected" turns it off (per device).
+- Reset also puts the camera back where it was when Run was pressed
+  (undoes the follow camera and any panning during the run).
+- Actuator "Feel forces" (per muscle, saved in the file): while running,
+  whenever the axial force passes the cap (force cap slider, N), the
+  limit the wave is driving toward moves to the length the muscle
+  actually reached, less 2 %; when the force is under half the cap the
+  limit creeps back out 3 %/s. The stroke rides just under the cap and
+  finds what the mechanism allows. Short / long readouts update live;
+  turn feel off to keep what it found. `feelStep` in sim.js; T27: a
+  0.3 m crank 1 m from the anchor accepts 0.7..1.3 m, and a muscle
+  asking 0.5..1.5 settles inside that with forces at the gravity load.
+  A first fixed-rate back-off was wrong (a pin parked at dead centre
+  keeps the force high for the rest of the half-cycle: the stroke
+  ratcheted to 2 cm). Needs some asymmetry (gravity) to leave a dead
+  centre; every real build has it.
+
 ## 0.16.0 - 2026-09-04
 
 Shape tool and a parts library. 172/172 tests; ForgeKit 0.5.1.

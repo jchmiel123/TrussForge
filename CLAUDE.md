@@ -73,6 +73,16 @@ Everything in-house and dependency-free.
   triangle / smooth (tanh of a duty-warped sine; `square` is legacy and
   loads as smooth). The UI edits SHORT / LONG lengths; the file keeps
   restLen + amp (lo = rest(1-amp), hi = rest(1+amp)).
+  Force-feel (`wave.feelOn`, `wave.feelF` N; `feelStep` after the rigid
+  forces are known): over the cap, the limit on the driven side moves
+  toward `m._len` (the length reached this step, recorded in the relax
+  loop) less FEEL_MARGIN with rate FEEL_APPROACH; under half the cap it
+  creeps out FEEL_CREEP/s up to FEEL_MAX_AMP. Do NOT go back to a fixed
+  back-off rate: a crank pin parked at dead centre keeps the force high
+  for the rest of the half-cycle and the stroke ratchets to nothing
+  (T27, crank geometry 0.7..1.3 is the known answer). An in-line crank
+  with gravity OFF is a true singularity (collinear constraints fight
+  forever) - keep gravity on in feel tests.
 - `engine/demos.js` - walker + hopper + inchworm + bridge + catapult +
   merry + chain (+ `DEMO_HINTS`
   for the UI: status text, forceView). Bridge = 4-bay Warren truss at
@@ -123,6 +133,15 @@ Everything in-house and dependency-free.
   - Project name: `state.name` (in the file); `#projName` input in the
     toolbar, `syncName()` after every state swap. Save = `saveToServer`
     (PUT /api/builds/<name>, download fallback); Open = `#libModal`.
+  - `toolDone()` after a construction action (member, node, hub, weld
+    toggle / merge) returns to Select unless `prefs.stickyTools` (View
+    panel toggle). Erase / Group are sticky; shapes and pastes ALWAYS
+    `setTool('group')` first (a Shape-tool drag on a node starts a shape).
+  - `runCam` = camera snapshot taken in `setRunning(true)`; the Reset
+    button restores it (follow cam / pans during the run are undone).
+  - Actuator panel: `#mFeel` toggle + `feelF` slider (also a pod target);
+    `updateForceReadout` calls `refreshSliders()` while a feeling
+    actuator runs so short / long move live.
   - Shape tool (key O, `tool === 'shape'`): gesture `shape` {x0,y0 = snapped
     start or the node under it, onNode}; `shapeGeom(g)` -> `shapeFragment`
     -> `insertSub`; `finishShape` merges the start node in (restoring its
@@ -203,7 +222,8 @@ Everything in-house and dependency-free.
 ## To do (Justin's asks, keep this list)
 
 - (Chains 0.12.0, catapult + inchworm 0.14.0, rest-length lock +
-  Rest = now 0.15.0, Shape tool + parts library 0.16.0 shipped.)
+  Rest = now 0.15.0, Shape tool + parts library 0.16.0, tools-return-
+  to-Select + Reset camera + actuator force-feel 0.17.0 shipped.)
   Nothing queued. Ideas not asked for: shapes as springs already work;
   a "hollow wheel" (double rim) and gear teeth would be next if wanted.
 

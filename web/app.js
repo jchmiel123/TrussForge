@@ -55,7 +55,7 @@ let strainOn = false;         // force view: color members by axial force
 // Grid / view preferences: per device (localStorage), NOT part of the
 // build file - open any save and change the lattice to suit it.
 const SHAPE_DEFAULTS = { kind: 'wheel', sides: 8, brace: 'one', bays: 4, member: 'beam' };
-const PREF_DEFAULTS = { theme: 'forge', gridType: 'square', pitch: 0.25, gridStyle: 'dots', gridBright: 0.5, gridSize: 2, shape: SHAPE_DEFAULTS };
+const PREF_DEFAULTS = { theme: 'forge', gridType: 'square', pitch: 0.25, gridStyle: 'dots', gridBright: 0.5, gridSize: 2, shape: SHAPE_DEFAULTS, stickyTools: false };
 const prefStore = new Prefs(PREFS_KEY, PREF_DEFAULTS);
 let prefs = prefStore.all();
 prefs.shape = { ...SHAPE_DEFAULTS, ...(prefs.shape || {}) };
@@ -737,8 +737,8 @@ function endPointer(ev) {
     const dropTarget = g.moved && !g.addToGroup ? hitMember(p.sx, p.sy, g.id) : null;
     if (g.moved && g.weld) {
       const to = hitNode(p.sx, p.sy, g.id);
-      if (to) mergeInto(to.id, g.id);
-      else if (dropTarget) weldOntoMember(g.id, dropTarget, p);
+      if (to) { mergeInto(to.id, g.id); toolDone(); }
+      else if (dropTarget) { weldOntoMember(g.id, dropTarget, p); toolDone(); }
       else bakeNode(g.id);
     } else if (g.moved && dropTarget) weldOntoMember(g.id, dropTarget, p);
     else if (g.moved) bakeNode(g.id);
@@ -786,19 +786,20 @@ function tapAt(px, py) {
     return;
   }
   if (tool === 'weld') {
-    if (n) { select('node', n.id); toggleWeld(); return; }
-    if (m) { insertHub(m, px, py); return; }
+    if (n) { select('node', n.id); toggleWeld(); toolDone(); return; }
+    if (m) { insertHub(m, px, py); toolDone(); return; }
     select(null);
     return;
   }
   if (tool === 'node') {
     if (n) { select('node', n.id); return; }
-    if (m) { insertHub(m, px, py); return; }
+    if (m) { insertHub(m, px, py); toolDone(); return; }
     pushUndo();
     const t = snapPt(wx(px), wy(py));
     const nn = addNode(state, t.x, t.y);   // born at rest where placed
     select('node', nn.id);
     markDirty();
+    toolDone();
     return;
   }
   // select / beam / spring / actuator: a tap selects
@@ -861,12 +862,14 @@ function finishMember(g, p) {
     if (r && r.members.length) select('member', r.members[Math.floor(r.members.length / 2)].id);
     setStatus(`Chain of ${links} link${links === 1 ? '' : 's'}. Anchor one end, or drape it over a solid member.`);
     markDirty();
+    toolDone();
     return;
   }
   const m = addMember(state, from, to, tool);
   if (running) rebuildBraces(state, true);
   if (m) select('member', m.id);
   markDirty();
+  toolDone();
 }
 
 // ---- Shape tool --------------------------------------------------------------
@@ -919,10 +922,11 @@ function finishShape(g) {
   }
   if (running) rebuildBraces(state, true);
   markDirty();
-  select('group', ids);                   // stays in the Shape tool: drag another
+  setTool('group');                       // like paste: the next move is positioning it
+  select('group', ids);
   const S = prefs.shape;
   const what = S.kind === 'wheel' || S.kind === 'ring' ? `${S.sides}-sided ${S.kind}` : S.kind === 'truss' ? `${S.bays}-bay truss` : 'box';
-  setStatus(`Added a ${what} (${ids.length} nodes)${g.onNode ? ' onto the node you started from' : ''}. It is selected as a group: drag a node to move it, or Rest = now / Save as part in the panel.`);
+  setStatus(`Added a ${what} (${ids.length} nodes)${g.onNode ? ' onto the node you started from' : ''}. Group tool: drag a node to move it all. Shape tool (O) for another.`);
 }
 
 function renderShapeProps() {
@@ -1044,6 +1048,15 @@ const TOOL_HINTS = {
   shape: 'Drag to size a wheel, ring, box or truss. Tap empty space for the shape settings. Start the drag on a node to build the shape onto it.',
   erase: 'Tap a node or member to delete it.',
 };
+
+// A construction action finished (member drawn, node placed, hub inserted,
+// weld toggled or merged): hand back to Select, like a drawing app, unless
+// the View panel says tools stay put. Shapes and pastes go to Group
+// regardless - the next thing you do with those is position them.
+function toolDone() {
+  if (prefs.stickyTools) return;
+  if (tool !== 'select' && tool !== 'erase' && tool !== 'group') setTool('select');
+}
 
 function setTool(t) {
   tool = t;
@@ -1281,6 +1294,9 @@ const TIPS = {
   smember: 'What the shape is built from. Beams are rigid; springs stretch.',
   insert: 'Add this saved build to the board as a part (a group you drag into place) instead of replacing what is there.',
   savePart: 'Save just this group to the library as a build of its own, so you can Insert it into other projects.',
+  feel: 'Let the muscle find its stroke: whenever its force passes the cap, the limit it is pushing toward backs off; when the force is low it creeps back out. Run it, watch short / long settle, then turn feel off to keep them.',
+  feelF: 'Axial force the muscle is allowed before it backs off. Start around 2-3x the build weight.',
+  sticky: 'Off: after drawing a member, placing a node or welding, the tool returns to Select. On: tools stay until you pick another. Shapes and pastes always land in the Group tool.',
   bakePose: 'Adopt the current pose of the whole build as its rest pose: positions and unlocked rest lengths. Use it after the sim settles under gravity. Locked members keep their length.',
   k: 'How hard the spring pulls back per meter of stretch.',
   c: 'How fast the spring stops bouncing. 0 = rings forever.',
@@ -1352,6 +1368,7 @@ function podTargets() {
       if (m.wave.type === 'smooth' || m.wave.type === 'square') {
         T.push({ key: 'duty', label: 'long time', min: 0.05, max: 0.95, step: 0.05, get: () => m.wave.duty, set: v => { m.wave.duty = v; } });
       }
+      if (m.wave.feelOn) T.push({ key: 'feelF', label: 'force cap', unit: 'N', min: 1, max: 200, step: 1, get: () => m.wave.feelF, set: v => { m.wave.feelF = v; } });
     }
     return { title: { beam: 'Beam', spring: 'Spring', actuator: 'Actuator', chain: 'Chain link' }[m.kind], targets: T };
   }
@@ -1473,6 +1490,8 @@ function renderMemberProps(m) {
     if (m.wave.type === 'smooth' || m.wave.type === 'square') {
       rows.push(propSlider('duty', 'time spent long', 0.05, 0.95, 0.05, m.wave.duty, ''));
     }
+    rows.push(`<div class="toggles"><button id="mFeel" class="${m.wave.feelOn ? 'active' : ''}" data-tip="${TIPS.feel}" title="${TIPS.feel}">${m.wave.feelOn ? 'Feeling forces: limits adapt' : 'Feel forces'}</button></div>`);
+    if (m.wave.feelOn) rows.push(propSlider('feelF', 'force cap', 1, 200, 1, m.wave.feelF, 'N'));
   }
   rows.push(`<div class="toggles">
     <button id="mFix" class="${m.fixRest ? 'active' : ''}" data-tip="${TIPS.fixRest}" title="${TIPS.fixRest}">${m.fixRest ? 'Length locked' : 'Lock length'}</button>
@@ -1509,6 +1528,16 @@ function renderMemberProps(m) {
     wireProp('period', v => { m.wave.period = v; });
     wireProp('phase', v => { m.wave.phase = v; });
     if (m.wave.type === 'smooth' || m.wave.type === 'square') wireProp('duty', v => { m.wave.duty = v; });
+    $('mFeel').addEventListener('click', () => {
+      pushUndo();
+      m.wave.feelOn = !m.wave.feelOn;
+      markDirty(); renderProps();
+      setStatus(m.wave.feelOn
+        ? 'Feeling: while running, the short / long limits back off whenever the force passes the cap and creep out when it is easy. Watch them settle, then turn it off to keep them.'
+        : 'Feel off: the limits stay where they are now.');
+      if (!running) draw();
+    });
+    if (m.wave.feelOn) wireProp('feelF', v => { m.wave.feelF = v; });
   }
   wireSel('kind', v => { changeKind(m, v); });
   $('mSolid').addEventListener('click', () => {
@@ -1595,14 +1624,19 @@ function renderGridProps() {
     ${propSelect('gstyle', 'style', ['dots', 'lines'], prefs.gridStyle)}
     ${propSlider('gbright', 'brightness', 0, 1, 0.05, prefs.gridBright, '')}
     ${propSlider('gsize', 'dot / line size', 1, 4, 0.5, prefs.gridSize, 'px')}
+    <div class="toggles" data-tip="${TIPS.sticky}" title="${TIPS.sticky}"><button id="gSticky" class="${prefs.stickyTools ? 'active' : ''}">${prefs.stickyTools ? 'Tools stay selected' : 'Tools return to Select after use'}</button></div>
     <div class="propBtns"><button id="gReset">Defaults</button></div>`;
+  $('gSticky').addEventListener('click', () => {
+    prefs.stickyTools = !prefs.stickyTools; savePrefs(); renderProps();
+    setStatus(prefs.stickyTools ? 'Tools stay selected until you pick another.' : 'After drawing a member, placing a node or welding, the tool returns to Select.');
+  });
   wirePref('theme', v => { prefs.theme = v; theme = applyTheme(v); });
   wirePref('gtype', v => { prefs.gridType = v; });
   wirePref('gpitch', v => { prefs.pitch = parseFloat(v); });
   wirePref('gstyle', v => { prefs.gridStyle = v; });
   wirePref('gbright', v => { prefs.gridBright = parseFloat(v); });
   wirePref('gsize', v => { prefs.gridSize = parseFloat(v); });
-  $('gReset').addEventListener('click', () => { prefs = { ...PREF_DEFAULTS }; savePrefs(); theme = applyTheme(prefs.theme); renderProps(); if (!running) draw(); });
+  $('gReset').addEventListener('click', () => { prefs = { ...PREF_DEFAULTS, shape: { ...SHAPE_DEFAULTS } }; savePrefs(); theme = applyTheme(prefs.theme); renderProps(); if (!running) draw(); });
 }
 // prefs are not part of the build: no undo entry, no autosave
 function wirePref(id, fn) {
@@ -1710,7 +1744,9 @@ function changeKind(m, kind) {
 // #ver (.version-tag) is filled by web/version.js - run node tools/stamp.js before deploy
 
 const runBtn = $('runBtn');
+let runCam = null;                    // camera at the moment Run was pressed
 function setRunning(r) {
+  if (r && !running) runCam = { ...cam };
   running = r;
   runBtn.textContent = r ? 'Pause' : 'Run';
   runBtn.classList.toggle('running', r);
@@ -1723,6 +1759,7 @@ runBtn.addEventListener('click', () => setRunning(!running));
 $('resetBtn').addEventListener('click', () => {
   reset(state);
   if (running) setRunning(false);      // reset means "stop and go back", not "restart"
+  if (runCam) { cam = { ...runCam }; saveView(); }   // the view goes back too (follow cam, pans)
   setStatus('Reset to build pose. Paused.');
   updateForceReadout();
   draw();
@@ -2131,6 +2168,7 @@ function updateForceReadout() {
   const m = selectedMember();
   const el = m && $('pv_force');
   if (el) el.textContent = fmtForce(memberForce(m));
+  if (m && m.kind === 'actuator' && m.wave.feelOn && running) refreshSliders();   // limits are moving
 }
 
 // ============================================================
